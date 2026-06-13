@@ -1,0 +1,1061 @@
+# controllers/data_controller.py
+import re
+from decimal import Decimal
+from collections import defaultdict
+from typing import Dict, List, Any, Optional, Set
+from db.database import get_session
+from db.models.entities import Airline, Airport, Indicator
+from db.models.enums import RouteType, ShippingRegularity
+from services.airline_ind_service import AirlineIndicatorService
+from services.airport_ind_service import AirportIndicatorService
+from utils.constants import (
+    MONTHS_LIST,
+    MONTHS_RU,
+    ROUTE_TYPES_ORDER,
+    ROUTE_TYPE_NAMES,
+    REGULARITY_ORDER,
+    GA12_CODE_ORDER_FLAT,
+    GA12_CODES_BY_SECTION,
+    GA12_SECTION_TITLE,
+    GA12_SUBHEADING_VTOM,
+    GA12_DETAIL_TON_CODES,
+    GA12_TON_PARENT_CODES,
+    MODE_AIRLINE,
+    PIVOT_LAYOUT_BY_ROUTES,
+    PIVOT_LAYOUT_SUMMARY,
+    MODE_AIRPORT,
+)
+from utils.ga15_airport_layout import (
+    GA15_METRIC_TAGS,
+    GA15_FLAT_HEADERS,
+    GA15_HEADER_GROUPS,
+    GA15_KEYS,
+    GA15_TABLE_ROWS,
+)
+
+# Псевдонимы кода показателя → канонический код вида 15ГА-R05-ПАС_ОТП
+GA15_CODE_ALIASES: Dict[str, str] = {}
+
+
+def _period_label_ru(filters: Optional[Dict]) -> str:
+    if not filters:
+        return "выбранный период"
+    pf = filters.get("period_from")
+    pt = filters.get("period_to")
+    if not pf or not pt:
+        return "выбранный период"
+    yf, mf = pf
+    yt, mt = pt
+    mk_f = MONTHS_LIST[mf - 1]
+    mk_t = MONTHS_LIST[mt - 1]
+    if yf == yt and mf == mt:
+        return f"{MONTHS_RU.get(mk_f, mk_f)} {yf} г."
+    return f"{MONTHS_RU.get(mk_f, mk_f)} {yf} г. — {MONTHS_RU.get(mk_t, mk_t)} {yt} г."
+
+
+def _ga15_metric_code_candidates(row_code: str, tag: str) -> List[str]:
+    keys = [f"15ГА-{row_code}-{tag}"]
+    if re.fullmatch(r"R\d{2}", row_code):
+        n = int(row_code[1:])
+        keys.append(f"15ГА-{n:02d}-{tag}")
+    return keys
+
+
+def _ga15_sum_metric(agg: Dict[str, Decimal], row_code: str, tag: str) -> tuple:
+    total = Decimal("0")
+    found = False
+    for key in _ga15_metric_code_candidates(row_code, tag):
+        if key not in agg:
+            continue
+        total += agg[key]
+        found = True
+    return total, found
+
+
+def _route_type_keys_for_total_sum(selected_route_type_names: List[str]) -> Set[str]:
+    """
+    Столбец «Всего»: сумма по выбранным видам маршрута.
+    «Местные» (interregional) в сумме включают внутренние и субсидируемые — всё немеждународное
+    в одном блоке; при одновременном выборе нескольких из {local, interregional, subsidir}
+    каждый ключ учитывается один раз.
+    """
+    keys: Set[str] = set()
+    for rt in selected_route_type_names:
+        if rt == "interregional":
+            keys.update(("local", "interregional", "subsidir"))
+        else:
+            keys.add(rt)
+    return keys
+
+
+def _dec_to_float(v: Decimal) -> float:
+    """Безопасное приведение; не использовать `if v` — Decimal('0') даёт False."""
+    return float(v)
+
+
+def _okei_sort_key(code: str) -> tuple:
+    """Запасной порядок: числовая часть кода ОКЕИ, затем суффикс (н, п, …)."""
+    if not code:
+        return (999999, "\uffff", "")
+    s = str(code).strip().lower().replace(" ", "")
+    m = re.match(r"^(\d+)(.*)$", s)
+    if not m:
+        return (999999, s, "")
+    return (int(m.group(1)), m.group(2), "")
+
+
+def _ga12_form_sort_key(code: str) -> tuple:
+    """Порядок строк как в типовом Excel 12-ГА (GA12_CODE_ORDER_FLAT)."""
+    c = (code or "").strip()
+    try:
+        return (0, GA12_CODE_ORDER_FLAT.index(c))
+    except ValueError:
+        return (1,) + _okei_sort_key(c)
+
+
+def _pivot_section_header_row(keys: List[str], title: str) -> Dict[str, Any]:
+    row: Dict[str, Any] = {"indicator": f"— {title} —", "measure": ""}
+    if "code" in keys:
+        row["code"] = ""
+    start_fill = 3 if "code" in keys else 2
+    for k in keys[start_fill:]:
+        row[k] = None
+    return row
+
+
+def _pivot_subheading_row(keys: List[str], text: str) -> Dict[str, Any]:
+    row: Dict[str, Any] = {"indicator": text, "measure": ""}
+    if "code" in keys:
+        row["code"] = ""
+    start_fill = 3 if "code" in keys else 2
+    for k in keys[start_fill:]:
+        row[k] = None
+    return row
+
+
+def _count_ga12_data_rows(pivot_rows: List[Dict[str, Any]]) -> int:
+    """Строки с данными: без заголовков разделов и подзаголовка «в том числе»."""
+    return sum(
+        1 for r in pivot_rows
+        if r.get("indicator")
+        and not str(r["indicator"]).startswith("—")
+        and r["indicator"] != GA12_SUBHEADING_VTOM
+    )
+
+
+def _load_indicator_graph(session) -> tuple:
+    rows = session.query(Indicator).all()
+    id_to_code = {r.id: (r.code or "").strip() for r in rows}
+    id_to_parent_id = {r.id: r.parent_id for r in rows}
+    return id_to_code, id_to_parent_id
+
+
+def _code_to_indicator_map(session) -> Dict[str, Indicator]:
+    """Код ОКЕИ → запись indicators (имена строк таблицы только из БД)."""
+    return {(r.code or "").strip(): r for r in session.query(Indicator).all() if r.code}
+
+
+def _name_to_indicator_id_from_records(records: List[Any]) -> Dict[str, int]:
+    out: Dict[str, int] = {}
+    for rec in records:
+        ind = getattr(rec, "indicator", None)
+        if ind:
+            n = ind.name.strip()
+            if n not in out:
+                out[n] = ind.id
+    return out
+
+
+def _indicator_row_sort_key(
+    ind_name: str,
+    name_to_id: Dict[str, int],
+    id_to_code: Dict[int, str],
+    id_to_parent_id: Dict[int, Optional[int]],
+    ind_codes: Dict[str, str],
+) -> tuple:
+    """Дочерние показатели (parent_id) сразу после родителя; порядок а/б/в по GA12_DETAIL_TON_CODES."""
+    iid = name_to_id.get(ind_name)
+    fb = ind_codes.get(ind_name, "")
+    if iid is None:
+        return (99,) + _ga12_form_sort_key(fb) + (99, 99)
+    pid = id_to_parent_id.get(iid)
+    code = id_to_code.get(iid, fb)
+    if pid is None:
+        return _ga12_form_sort_key(code) + (0, 0)
+    pcode = id_to_code.get(pid, "")
+    base = _ga12_form_sort_key(pcode)
+    if code in GA12_DETAIL_TON_CODES:
+        suf = 1 + GA12_DETAIL_TON_CODES.index(code)
+    else:
+        suf = 50
+    return base + (1, suf)
+
+
+def _emit_vtom_before_row(
+    code: str,
+    name_to_id: Dict[str, int],
+    id_to_code: Dict[int, str],
+    id_to_parent_id: Dict[int, Optional[int]],
+    ind_name: str,
+    vtom_done: bool,
+) -> bool:
+    if vtom_done:
+        return False
+    if code in GA12_DETAIL_TON_CODES:
+        return True
+    iid = name_to_id.get(ind_name)
+    if not iid:
+        return False
+    pid = id_to_parent_id.get(iid)
+    if not pid:
+        return False
+    return id_to_code.get(pid) in GA12_TON_PARENT_CODES
+
+
+def _norm_route_type(rt) -> str:
+    """Имя члена RouteType (trunk, local, …) для сопоставления с ROUTE_TYPES_ORDER."""
+    if isinstance(rt, RouteType):
+        return rt.name
+    if isinstance(rt, str):
+        s = rt.strip()
+        for e in RouteType:
+            if e.name == s or e.value == s:
+                return e.name
+    return str(rt).strip()
+
+
+def _norm_regularity(reg) -> str:
+    """То же значение, что в REGULARITY_ORDER (русская подпись раздела)."""
+    if isinstance(reg, ShippingRegularity):
+        return reg.value
+    if isinstance(reg, str):
+        for e in ShippingRegularity:
+            if e.name == reg or e.value == reg:
+                return e.value
+    return str(reg)
+
+
+class DataController:
+    """Контроллер для управления данными таблиц"""
+    
+    def __init__(self):
+        self.pivot_model = None
+        self.detail_model = None
+    
+    def set_models(self, pivot_model, detail_model):
+        """Устанавливает модели данных"""
+        self.pivot_model = pivot_model
+        self.detail_model = detail_model
+    
+    def load_pivot_data(self, mode: int, filters: Dict, entity_id: Optional[int] = None) -> Dict[str, Any]:
+        """Загружает данные для сводной таблицы"""
+        if mode == MODE_AIRLINE:
+            if entity_id:
+                lay = (filters or {}).get("pivot_table_layout", PIVOT_LAYOUT_BY_ROUTES)
+                if lay == PIVOT_LAYOUT_SUMMARY:
+                    return self._load_pivot_per_airline_summary(filters, entity_id)
+                return self._load_pivot_per_airline(filters, entity_id)
+            else:
+                lay = (filters or {}).get("pivot_table_layout", PIVOT_LAYOUT_BY_ROUTES)
+                if lay == PIVOT_LAYOUT_BY_ROUTES:
+                    return self._load_pivot_multi_airline_by_routes(filters)
+                return self._load_pivot_all_airlines(filters)
+        else:  # MODE_AIRPORT
+            if entity_id:
+                return self._load_pivot_ga15_airport(filters, entity_id)
+            return self._load_pivot_ga15_empty("Выберите аэропорт в списке фильтра.")
+    
+    def _load_pivot_all_airlines(self, filters: Dict) -> Dict[str, Any]:
+        """Сводная таблица для всех авиакомпаний (полный бланк 12-ГА; без данных — нули)."""
+        records = AirlineIndicatorService.filter_indicators(filters) if filters else AirlineIndicatorService.get_all_indicators()
+
+        ind_by_code: Dict[str, Any] = defaultdict(
+            lambda: defaultdict(lambda: defaultdict(lambda: Decimal('0')))
+        )
+        ind_by_name_nocode: Dict[str, Any] = defaultdict(
+            lambda: defaultdict(lambda: defaultdict(lambda: Decimal('0')))
+        )
+        measure_nocode: Dict[str, str] = {}
+        airlines = set()
+        months_seen = set()
+
+        for rec in records:
+            if not rec.indicator or not rec.shipping or not rec.shipping.airline:
+                continue
+            airline_name = rec.shipping.airline.name.strip()
+            month_key = rec.month.name if hasattr(rec.month, 'name') else str(rec.month)
+            airlines.add(airline_name)
+            months_seen.add(month_key)
+            code = (rec.indicator.code or "").strip()
+            if rec.value is not None:
+                if code:
+                    ind_by_code[code][month_key][airline_name] += rec.value
+                else:
+                    ind_name = rec.indicator.name.strip()
+                    ind_by_name_nocode[ind_name][month_key][airline_name] += rec.value
+                    measure_nocode[ind_name] = (rec.indicator.measure or "").strip()
+
+        with get_session() as session:
+            code_to_row = {
+                (r.code or "").strip(): r
+                for r in session.query(Indicator).all()
+                if r.code
+            }
+
+        airlines = sorted(airlines)
+        months = [m for m in MONTHS_LIST if m in months_seen]
+        if not months:
+            months = [None]
+
+        headers = ["Показатель", "Ед. изм.", "Код ОКЕИ"]
+        keys = ["indicator", "measure", "code"]
+        groups = []
+
+        col = len(headers)
+        for month_key in months:
+            first = col
+            headers.append("Свод")
+            keys.append(f"m_{month_key}_total")
+            col += 1
+            for i, airline in enumerate(airlines):
+                headers.append(airline)
+                keys.append(f"m_{month_key}_a_{i}")
+                col += 1
+            last = col - 1
+            month_label = MONTHS_RU.get(month_key, month_key or "")
+            groups.append((first, last, month_label))
+
+        known_codes = set(GA12_CODE_ORDER_FLAT)
+
+        def data_row_for_code(code: str) -> Optional[Dict[str, Any]]:
+            """Строка свода только для кода из справочника indicators (название и ед. изм. из БД)."""
+            ind = code_to_row.get(code)
+            if not ind:
+                return None
+            row: Dict[str, Any] = {
+                "indicator": ind.name.strip(),
+                "measure": (ind.measure or "").strip(),
+                "code": code,
+            }
+            for month_key in months:
+                month_data = ind_by_code.get(code, {}).get(month_key, {})
+                total = Decimal('0')
+                for airline in airlines:
+                    val = month_data.get(airline, Decimal('0'))
+                    total += val
+                row[f"m_{month_key}_total"] = _dec_to_float(total)
+                for i, airline in enumerate(airlines):
+                    val = month_data.get(airline, Decimal('0'))
+                    row[f"m_{month_key}_a_{i}"] = _dec_to_float(val)
+            return row
+
+        def data_row_for_name_nocode(ind_name: str) -> Dict[str, Any]:
+            row: Dict[str, Any] = {
+                "indicator": ind_name,
+                "measure": measure_nocode.get(ind_name, ""),
+                "code": "",
+            }
+            for month_key in months:
+                month_data = ind_by_name_nocode.get(ind_name, {}).get(month_key, {})
+                total = Decimal('0')
+                for airline in airlines:
+                    val = month_data.get(airline, Decimal('0'))
+                    total += val
+                row[f"m_{month_key}_total"] = _dec_to_float(total)
+                for i, airline in enumerate(airlines):
+                    val = month_data.get(airline, Decimal('0'))
+                    row[f"m_{month_key}_a_{i}"] = _dec_to_float(val)
+            return row
+
+        pivot_rows = []
+        for section_key in REGULARITY_ORDER:
+            codes = GA12_CODES_BY_SECTION.get(section_key, [])
+            codes_in_db = [c for c in codes if c in code_to_row]
+            if not codes_in_db:
+                continue
+            disp = GA12_SECTION_TITLE.get(section_key, section_key)
+            pivot_rows.append(_pivot_section_header_row(keys, disp))
+            vtom_done = False
+            for code in codes_in_db:
+                if code in GA12_DETAIL_TON_CODES and not vtom_done:
+                    pivot_rows.append(_pivot_subheading_row(keys, GA12_SUBHEADING_VTOM))
+                    vtom_done = True
+                row = data_row_for_code(code)
+                if row:
+                    pivot_rows.append(row)
+
+        orphan_codes = sorted(
+            [c for c in ind_by_code.keys() if c not in known_codes and c in code_to_row],
+            key=lambda c: _ga12_form_sort_key(c),
+        )
+        orphan_names = sorted(ind_by_name_nocode.keys())
+        if orphan_codes or orphan_names:
+            pivot_rows.append(_pivot_section_header_row(keys, "ПРОЧИЕ ПОКАЗАТЕЛИ"))
+            for code in orphan_codes:
+                row = data_row_for_code(code)
+                if row:
+                    pivot_rows.append(row)
+            for ind_name in orphan_names:
+                pivot_rows.append(data_row_for_name_nocode(ind_name))
+
+        n_data_rows = _count_ga12_data_rows(pivot_rows)
+
+        return {
+            'rows': pivot_rows,
+            'headers': headers,
+            'keys': keys,
+            'groups': groups,
+            'stats': {
+                'indicators': n_data_rows,
+                'airlines': len(airlines),
+                'months': len(months) if months[0] else 0,
+                'records': len(records)
+            }
+        }
+    
+    def _compute_airline_routes_pivot(
+        self, records: List[Any], filters: Optional[Dict]
+    ) -> Dict[str, Any]:
+        """Общая сетка 12-ГА: месяцы × виды маршрута + «Всего» (данные уже отфильтрованы по АК)."""
+        data = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: Decimal("0"))))
+        months_seen: set = set()
+
+        for rec in records:
+            if not rec.indicator or not rec.shipping or not rec.shipping.route:
+                continue
+            ind_name = rec.indicator.name.strip()
+            reg_key = _norm_regularity(rec.shipping.route.regularity)
+            rt_key = _norm_route_type(rec.shipping.route.type)
+            month_key = rec.month.name if hasattr(rec.month, "name") else str(rec.month)
+
+            months_seen.add(month_key)
+            if rec.value is not None:
+                data[(reg_key, ind_name)][month_key][rt_key] += rec.value
+
+        name_to_id = _name_to_indicator_id_from_records(records)
+        code_to_indicator: Dict[str, Indicator] = {}
+        with get_session() as session:
+            id_to_code, id_to_parent_id = _load_indicator_graph(session)
+            code_to_indicator = _code_to_indicator_map(session)
+            for ind in code_to_indicator.values():
+                n = ind.name.strip()
+                if n not in name_to_id:
+                    name_to_id[n] = ind.id
+
+        months = [m for m in MONTHS_LIST if m in months_seen]
+        if not months:
+            months = [None]
+
+        f = filters or {}
+        rtm = f.get("route_types")
+        if rtm:
+            route_types_to_show = [getattr(rt, "name", rt) for rt in rtm]
+        elif f.get("route_type"):
+            route_types_to_show = [f["route_type"].name]
+        else:
+            route_types_to_show = ROUTE_TYPES_ORDER
+
+        headers = ["Показатель", "Ед. изм.", "Код ОКЕИ"]
+        keys = ["indicator", "measure", "code"]
+        groups = []
+
+        col = len(headers)
+        for month_key in months:
+            first = col
+            for rt in route_types_to_show:
+                headers.append(ROUTE_TYPE_NAMES[rt])
+                keys.append(f"m_{month_key}_rt_{rt}")
+                col += 1
+            headers.append("Всего")
+            keys.append(f"m_{month_key}_total")
+            col += 1
+            last = col - 1
+            month_label = MONTHS_RU.get(month_key, month_key or "")
+            groups.append((first, last, month_label))
+
+        pivot_rows: List[Dict[str, Any]] = []
+        for section_key in REGULARITY_ORDER:
+            codes = GA12_CODES_BY_SECTION.get(section_key, [])
+            codes_in_db = [c for c in codes if c in code_to_indicator]
+            if not codes_in_db:
+                continue
+            sec_title = GA12_SECTION_TITLE.get(section_key, section_key)
+            pivot_rows.append(_pivot_section_header_row(keys, sec_title))
+            vtom_done = False
+            for code in codes_in_db:
+                ind = code_to_indicator[code]
+                ind_name = ind.name.strip()
+                if code in GA12_DETAIL_TON_CODES and not vtom_done:
+                    pivot_rows.append(_pivot_subheading_row(keys, GA12_SUBHEADING_VTOM))
+                    vtom_done = True
+                if _emit_vtom_before_row(
+                    code, name_to_id, id_to_code, id_to_parent_id, ind_name, vtom_done
+                ):
+                    pivot_rows.append(_pivot_subheading_row(keys, GA12_SUBHEADING_VTOM))
+                    vtom_done = True
+                row = {
+                    "indicator": ind_name,
+                    "measure": (ind.measure or "").strip(),
+                    "code": code,
+                }
+                for month_key in months:
+                    inner = data.get((section_key, ind_name))
+                    month_data = inner.get(month_key, {}) if inner is not None else {}
+                    for rt in route_types_to_show:
+                        val = month_data.get(rt, Decimal("0"))
+                        row[f"m_{month_key}_rt_{rt}"] = _dec_to_float(val)
+                    total_keys = _route_type_keys_for_total_sum(route_types_to_show)
+                    total_row = sum(month_data.get(k, Decimal("0")) for k in total_keys)
+                    row[f"m_{month_key}_total"] = _dec_to_float(total_row)
+                pivot_rows.append(row)
+
+        n_indicators = _count_ga12_data_rows(pivot_rows)
+
+        return {
+            "rows": pivot_rows,
+            "headers": headers,
+            "keys": keys,
+            "groups": groups,
+            "months": months,
+            "n_indicators": n_indicators,
+            "n_records": len(records),
+        }
+
+    def _load_pivot_multi_airline_by_routes(self, filters: Dict) -> Dict[str, Any]:
+        """Несколько АК: по маршрутам; внутри каждого месяца — все выбранные а/к (без данных — нули)."""
+        records = (
+            AirlineIndicatorService.filter_indicators(filters)
+            if filters
+            else AirlineIndicatorService.get_all_indicators()
+        )
+
+        f = filters or {}
+        if f.get("airline_ids"):
+            ids = [int(x) for x in f["airline_ids"]]
+            with get_session() as session:
+                rows = session.query(Airline).filter(Airline.id.in_(ids)).all()
+            id_to_name = {a.id: a.name.strip() for a in rows}
+            airline_rows = [(i, id_to_name[i]) for i in ids if i in id_to_name]
+        else:
+            with get_session() as session:
+                airline_rows = [
+                    (a.id, a.name.strip())
+                    for a in session.query(Airline).order_by(Airline.name).all()
+                ]
+
+        if not airline_rows:
+            seen: Dict[int, str] = {}
+            for rec in records:
+                if rec.shipping and rec.shipping.airline:
+                    al = rec.shipping.airline
+                    seen[al.id] = al.name.strip()
+            airline_rows = sorted(seen.items(), key=lambda x: x[1])
+
+        # (регулярность, имя показателя) -> месяц -> airline_id -> route_type -> сумма
+        data = defaultdict(
+            lambda: defaultdict(
+                lambda: defaultdict(
+                    lambda: defaultdict(lambda: Decimal("0"))
+                )
+            )
+        )
+        months_seen: set = set()
+
+        for rec in records:
+            if not rec.indicator or not rec.shipping or not rec.shipping.route:
+                continue
+            if not rec.shipping.airline:
+                continue
+            aid = rec.shipping.airline.id
+            ind_name = rec.indicator.name.strip()
+            reg_key = _norm_regularity(rec.shipping.route.regularity)
+            rt_key = _norm_route_type(rec.shipping.route.type)
+            month_key = rec.month.name if hasattr(rec.month, "name") else str(rec.month)
+            months_seen.add(month_key)
+            if rec.value is not None:
+                data[(reg_key, ind_name)][month_key][aid][rt_key] += rec.value
+
+        name_to_id = _name_to_indicator_id_from_records(records)
+        code_to_indicator: Dict[str, Indicator] = {}
+        with get_session() as session:
+            id_to_code, id_to_parent_id = _load_indicator_graph(session)
+            code_to_indicator = _code_to_indicator_map(session)
+            for ind in code_to_indicator.values():
+                n = ind.name.strip()
+                if n not in name_to_id:
+                    name_to_id[n] = ind.id
+
+        months = [m for m in MONTHS_LIST if m in months_seen]
+        if not months:
+            months = [None]
+
+        rtm = f.get("route_types")
+        if rtm:
+            route_types_to_show = [getattr(rt, "name", rt) for rt in rtm]
+        elif f.get("route_type"):
+            route_types_to_show = [f["route_type"].name]
+        else:
+            route_types_to_show = ROUTE_TYPES_ORDER
+
+        headers = ["Показатель", "Ед. изм.", "Код ОКЕИ"]
+        keys = ["indicator", "measure", "code"]
+        groups = []
+        col = len(headers)
+
+        for month_key in months:
+            first = col
+            for aid, aname in airline_rows:
+                for rt in route_types_to_show:
+                    headers.append(f"{aname} — {ROUTE_TYPE_NAMES[rt]}")
+                    keys.append(f"m_{month_key}_aid_{aid}_rt_{rt}")
+                    col += 1
+                headers.append(f"{aname} — Всего")
+                keys.append(f"m_{month_key}_aid_{aid}_total")
+                col += 1
+            last = col - 1
+            month_label = MONTHS_RU.get(month_key, month_key or "")
+            groups.append((first, last, month_label))
+
+        pivot_rows: List[Dict[str, Any]] = []
+        for section_key in REGULARITY_ORDER:
+            codes = GA12_CODES_BY_SECTION.get(section_key, [])
+            codes_in_db = [c for c in codes if c in code_to_indicator]
+            if not codes_in_db:
+                continue
+            sec_title = GA12_SECTION_TITLE.get(section_key, section_key)
+            pivot_rows.append(_pivot_section_header_row(keys, sec_title))
+            vtom_done = False
+            for code in codes_in_db:
+                ind = code_to_indicator[code]
+                ind_name = ind.name.strip()
+                if code in GA12_DETAIL_TON_CODES and not vtom_done:
+                    pivot_rows.append(_pivot_subheading_row(keys, GA12_SUBHEADING_VTOM))
+                    vtom_done = True
+                if _emit_vtom_before_row(
+                    code, name_to_id, id_to_code, id_to_parent_id, ind_name, vtom_done
+                ):
+                    pivot_rows.append(_pivot_subheading_row(keys, GA12_SUBHEADING_VTOM))
+                    vtom_done = True
+                row = {
+                    "indicator": ind_name,
+                    "measure": (ind.measure or "").strip(),
+                    "code": code,
+                }
+                inner = data.get((section_key, ind_name))
+                for month_key in months:
+                    month_bucket = inner[month_key] if inner is not None else None
+                    for aid, _ in airline_rows:
+                        for rt in route_types_to_show:
+                            val = Decimal("0")
+                            if month_bucket is not None:
+                                val = month_bucket[aid][rt]
+                            row[f"m_{month_key}_aid_{aid}_rt_{rt}"] = _dec_to_float(val)
+                        total_keys = _route_type_keys_for_total_sum(route_types_to_show)
+                        total_row = Decimal("0")
+                        if month_bucket is not None:
+                            for k in total_keys:
+                                total_row += month_bucket[aid][k]
+                        row[f"m_{month_key}_aid_{aid}_total"] = _dec_to_float(total_row)
+                pivot_rows.append(row)
+
+        n_indicators = _count_ga12_data_rows(pivot_rows)
+
+        return {
+            "rows": pivot_rows,
+            "headers": headers,
+            "keys": keys,
+            "groups": groups,
+            "stats": {
+                "indicators": n_indicators,
+                "months": len(months) if months[0] else 0,
+                "records": len(records),
+                "airlines": len(airline_rows),
+                "pivot_multi_airline_routes": True,
+            },
+        }
+
+    def _load_pivot_per_airline(self, filters: Dict, airline_id: int) -> Dict[str, Any]:
+        """Сводная таблица для одной авиакомпании"""
+        airline_filters = filters.copy() if filters else {}
+        airline_filters["airline_id"] = airline_id
+
+        records = AirlineIndicatorService.filter_indicators(airline_filters)
+
+        with get_session() as session:
+            al = session.get(Airline, airline_id)
+            airline_name = al.name.strip() if al else ""
+
+        base = self._compute_airline_routes_pivot(records, filters)
+        months = base["months"]
+        return {
+            "rows": base["rows"],
+            "headers": base["headers"],
+            "keys": base["keys"],
+            "groups": base["groups"],
+            "stats": {
+                "airline_name": airline_name,
+                "indicators": base["n_indicators"],
+                "months": len(months) if months[0] else 0,
+                "records": base["n_records"],
+            },
+        }
+
+    def _load_pivot_per_airline_summary(self, filters: Dict, airline_id: int) -> Dict[str, Any]:
+        """Свод по одной АК: по месяцам без разбивки по видам маршрута (сумма по учтённым маршрутам за месяц)."""
+        airline_filters = filters.copy() if filters else {}
+        airline_filters["airline_id"] = airline_id
+
+        records = AirlineIndicatorService.filter_indicators(airline_filters)
+
+        with get_session() as session:
+            al = session.get(Airline, airline_id)
+            airline_name = al.name.strip() if al else ""
+
+        data = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: Decimal("0"))))
+        months_seen: set = set()
+
+        for rec in records:
+            if not rec.indicator or not rec.shipping or not rec.shipping.route:
+                continue
+            ind_name = rec.indicator.name.strip()
+            reg_key = _norm_regularity(rec.shipping.route.regularity)
+            rt_key = _norm_route_type(rec.shipping.route.type)
+            month_key = rec.month.name if hasattr(rec.month, "name") else str(rec.month)
+            months_seen.add(month_key)
+            if rec.value is not None:
+                data[(reg_key, ind_name)][month_key][rt_key] += rec.value
+
+        agg: Dict[tuple, Dict[Any, Decimal]] = defaultdict(lambda: defaultdict(lambda: Decimal("0")))
+        for (_reg_key, _ind_name), md in data.items():
+            for month_key, rt_dict in md.items():
+                agg[(_reg_key, _ind_name)][month_key] += sum(rt_dict.values())
+
+        name_to_id = _name_to_indicator_id_from_records(records)
+        code_to_indicator: Dict[str, Indicator] = {}
+        with get_session() as session:
+            id_to_code, id_to_parent_id = _load_indicator_graph(session)
+            code_to_indicator = _code_to_indicator_map(session)
+            for ind in code_to_indicator.values():
+                n = ind.name.strip()
+                if n not in name_to_id:
+                    name_to_id[n] = ind.id
+
+        months = [m for m in MONTHS_LIST if m in months_seen]
+        if not months:
+            months = [None]
+
+        headers = ["Показатель", "Ед. изм.", "Код ОКЕИ"] + [MONTHS_RU.get(m, m or "") for m in months] + ["Всего"]
+        keys = ["indicator", "measure", "code"] + [f"m_{m}" for m in months] + ["total"]
+        groups: List[tuple] = []
+
+        pivot_rows: List[Dict[str, Any]] = []
+        for section_key in REGULARITY_ORDER:
+            codes = GA12_CODES_BY_SECTION.get(section_key, [])
+            codes_in_db = [c for c in codes if c in code_to_indicator]
+            if not codes_in_db:
+                continue
+            sec_title = GA12_SECTION_TITLE.get(section_key, section_key)
+            pivot_rows.append(_pivot_section_header_row(keys, sec_title))
+            vtom_done = False
+            for code in codes_in_db:
+                ind = code_to_indicator[code]
+                ind_name = ind.name.strip()
+                if code in GA12_DETAIL_TON_CODES and not vtom_done:
+                    pivot_rows.append(_pivot_subheading_row(keys, GA12_SUBHEADING_VTOM))
+                    vtom_done = True
+                if _emit_vtom_before_row(
+                    code, name_to_id, id_to_code, id_to_parent_id, ind_name, vtom_done
+                ):
+                    pivot_rows.append(_pivot_subheading_row(keys, GA12_SUBHEADING_VTOM))
+                    vtom_done = True
+                row: Dict[str, Any] = {
+                    "indicator": ind_name,
+                    "measure": (ind.measure or "").strip(),
+                    "code": code,
+                }
+                inner = agg.get((section_key, ind_name))
+                total = Decimal("0")
+                for m in months:
+                    val = inner.get(m, Decimal("0")) if inner is not None else Decimal("0")
+                    row[f"m_{m}"] = _dec_to_float(val)
+                    total += val
+                row["total"] = _dec_to_float(total)
+                pivot_rows.append(row)
+
+        n_indicators = _count_ga12_data_rows(pivot_rows)
+
+        return {
+            "rows": pivot_rows,
+            "headers": headers,
+            "keys": keys,
+            "groups": groups,
+            "stats": {
+                "airline_name": airline_name,
+                "indicators": n_indicators,
+                "months": len(months) if months[0] else 0,
+                "records": len(records),
+            },
+        }
+
+    def _load_pivot_all_airports(self, filters: Dict) -> Dict[str, Any]:
+        """Сводная таблица для всех аэропортов (порядок 12-ГА; строки только из справочника indicators)."""
+        records = AirportIndicatorService.filter_indicators(filters) if filters else AirportIndicatorService.get_all_indicators()
+
+        ind_by_code: Dict[str, Any] = defaultdict(
+            lambda: defaultdict(lambda: defaultdict(lambda: Decimal('0')))
+        )
+        ind_by_name_nocode: Dict[str, Any] = defaultdict(
+            lambda: defaultdict(lambda: defaultdict(lambda: Decimal('0')))
+        )
+        measure_nocode: Dict[str, str] = {}
+        airports = set()
+        months_seen = set()
+
+        for rec in records:
+            if not rec.indicator or not rec.airport:
+                continue
+            ap_name = rec.airport.name.strip()
+            month_key = rec.month.name if hasattr(rec.month, 'name') else str(rec.month)
+            airports.add(ap_name)
+            months_seen.add(month_key)
+            code = (rec.indicator.code or "").strip()
+            if rec.value is not None:
+                if code:
+                    ind_by_code[code][month_key][ap_name] += rec.value
+                else:
+                    ind_name = rec.indicator.name.strip()
+                    ind_by_name_nocode[ind_name][month_key][ap_name] += rec.value
+                    measure_nocode[ind_name] = (rec.indicator.measure or "").strip()
+
+        name_to_id = _name_to_indicator_id_from_records(records)
+        with get_session() as session:
+            id_to_code, id_to_parent_id = _load_indicator_graph(session)
+            code_to_row = _code_to_indicator_map(session)
+            for ind in code_to_row.values():
+                n = ind.name.strip()
+                if n not in name_to_id:
+                    name_to_id[n] = ind.id
+        
+        airports = sorted(airports)
+        months = [m for m in MONTHS_LIST if m in months_seen]
+        if not months:
+            months = [None]
+        
+        headers = ["Показатель", "Ед. изм.", "Код ОКЕИ"]
+        keys = ["indicator", "measure", "code"]
+        groups = []
+        col = len(headers)
+        for month_key in months:
+            first = col
+            headers.append("Свод")
+            keys.append(f"m_{month_key}_total")
+            col += 1
+            for i, ap in enumerate(airports):
+                headers.append(ap)
+                keys.append(f"m_{month_key}_a_{i}")
+                col += 1
+            last = col - 1
+            month_label = MONTHS_RU.get(month_key, month_key or "")
+            groups.append((first, last, month_label))
+        
+        pivot_rows = []
+        known_codes = set(GA12_CODE_ORDER_FLAT)
+
+        def data_row_for_code_ap(code: str) -> Optional[Dict[str, Any]]:
+            ind = code_to_row.get(code)
+            if not ind:
+                return None
+            row: Dict[str, Any] = {
+                "indicator": ind.name.strip(),
+                "measure": (ind.measure or "").strip(),
+                "code": code,
+            }
+            for month_key in months:
+                month_data = ind_by_code.get(code, {}).get(month_key, {})
+                total = Decimal('0')
+                for ap in airports:
+                    total += month_data.get(ap, Decimal('0'))
+                row[f"m_{month_key}_total"] = _dec_to_float(total)
+                for i, ap in enumerate(airports):
+                    row[f"m_{month_key}_a_{i}"] = _dec_to_float(month_data.get(ap, Decimal('0')))
+            return row
+
+        def data_row_for_name_nocode_ap(ind_name: str) -> Dict[str, Any]:
+            row: Dict[str, Any] = {
+                "indicator": ind_name,
+                "measure": measure_nocode.get(ind_name, ""),
+                "code": "",
+            }
+            for month_key in months:
+                month_data = ind_by_name_nocode.get(ind_name, {}).get(month_key, {})
+                total = Decimal('0')
+                for ap in airports:
+                    total += month_data.get(ap, Decimal('0'))
+                row[f"m_{month_key}_total"] = _dec_to_float(total)
+                for i, ap in enumerate(airports):
+                    row[f"m_{month_key}_a_{i}"] = _dec_to_float(month_data.get(ap, Decimal('0')))
+            return row
+
+        for section_key in REGULARITY_ORDER:
+            codes = GA12_CODES_BY_SECTION.get(section_key, [])
+            codes_in_db = [c for c in codes if c in code_to_row]
+            if not codes_in_db:
+                continue
+            disp = GA12_SECTION_TITLE.get(section_key, section_key)
+            pivot_rows.append(_pivot_section_header_row(keys, disp))
+            vtom_done = False
+            for code in codes_in_db:
+                ind = code_to_row[code]
+                ind_name = ind.name.strip()
+                if code in GA12_DETAIL_TON_CODES and not vtom_done:
+                    pivot_rows.append(_pivot_subheading_row(keys, GA12_SUBHEADING_VTOM))
+                    vtom_done = True
+                if _emit_vtom_before_row(
+                    code, name_to_id, id_to_code, id_to_parent_id, ind_name, vtom_done
+                ):
+                    pivot_rows.append(_pivot_subheading_row(keys, GA12_SUBHEADING_VTOM))
+                    vtom_done = True
+                row = data_row_for_code_ap(code)
+                if row:
+                    pivot_rows.append(row)
+
+        orphan_codes = sorted(
+            [c for c in ind_by_code.keys() if c not in known_codes and c in code_to_row],
+            key=lambda c: _ga12_form_sort_key(c),
+        )
+        orphan_names = sorted(ind_by_name_nocode.keys())
+        if orphan_codes or orphan_names:
+            pivot_rows.append(_pivot_section_header_row(keys, "ПРОЧИЕ ПОКАЗАТЕЛИ"))
+            for code in orphan_codes:
+                row = data_row_for_code_ap(code)
+                if row:
+                    pivot_rows.append(row)
+            for ind_name in orphan_names:
+                pivot_rows.append(data_row_for_name_nocode_ap(ind_name))
+
+        n_data_rows = _count_ga12_data_rows(pivot_rows)
+
+        return {
+            'rows': pivot_rows,
+            'headers': headers,
+            'keys': keys,
+            'groups': groups,
+            'stats': {
+                'indicators': n_data_rows,
+                'airports': len(airports),
+                'records': len(records)
+            }
+        }
+    
+    def _load_pivot_ga15_empty(self, message: str) -> Dict[str, Any]:
+        """Таблица 15-ГА без выбранного аэропорта."""
+        row = {k: None for k in GA15_KEYS}
+        row[GA15_KEYS[0]] = message
+        return {
+            "rows": [row],
+            "headers": GA15_FLAT_HEADERS,
+            "keys": GA15_KEYS,
+            "groups": GA15_HEADER_GROUPS,
+            "stats": {
+                "airport_name": "",
+                "layout_ga15": True,
+                "records": 0,
+                "indicators": 0,
+            },
+        }
+
+    def _load_pivot_ga15_airport(self, filters: Dict, airport_id: int) -> Dict[str, Any]:
+        """Свод 15-ГА для одного аэропорта (структура как в типовом Excel)."""
+        airport_filters = filters.copy() if filters else {}
+        airport_filters["airport_id"] = airport_id
+
+        records = AirportIndicatorService.filter_indicators(airport_filters)
+
+        agg: Dict[str, Decimal] = {}
+        for rec in records:
+            ind = rec.indicator
+            if not ind:
+                continue
+            code = (ind.code or "").strip()
+            if not code:
+                continue
+            canon = GA15_CODE_ALIASES.get(code, code)
+            if rec.value is not None:
+                agg[canon] = agg.get(canon, Decimal("0")) + rec.value
+
+        airport_name = ""
+        with get_session() as session:
+            ap = session.get(Airport, airport_id)
+            airport_name = ap.name.strip() if ap else ""
+
+        period_label = _period_label_ru(filters)
+        pivot_rows: List[Dict[str, Any]] = []
+
+        for spec in GA15_TABLE_ROWS:
+            row = {k: None for k in GA15_KEYS}
+            if spec.kind == "title":
+                row[GA15_KEYS[0]] = spec.title.format(airport_name=airport_name)
+            elif spec.kind == "spacer":
+                row[GA15_KEYS[0]] = ""
+            elif spec.kind == "period":
+                row[GA15_KEYS[0]] = f"за {period_label}"
+            elif spec.kind == "section":
+                row[GA15_KEYS[0]] = spec.title
+            elif spec.kind == "subheading":
+                row[GA15_KEYS[0]] = spec.title
+            elif spec.kind in ("data", "subdetail"):
+                row[GA15_KEYS[0]] = spec.title
+                line_disp = spec.line_display
+                row[GA15_KEYS[1]] = line_disp if line_disp is not None else ""
+                rc = spec.row_code
+                if rc:
+                    for j, tag in enumerate(GA15_METRIC_TAGS):
+                        ci = 2 + j
+                        total, found = _ga15_sum_metric(agg, rc, tag)
+                        if rc == "R09":
+                            row[GA15_KEYS[ci]] = _dec_to_float(total) if found else "Х"
+                        else:
+                            row[GA15_KEYS[ci]] = _dec_to_float(total) if found else 0.0
+            pivot_rows.append(row)
+
+        n_data_lines = sum(
+            1 for s in GA15_TABLE_ROWS if s.kind in ("data", "subdetail") and s.row_code
+        )
+
+        return {
+            "rows": pivot_rows,
+            "headers": GA15_FLAT_HEADERS,
+            "keys": GA15_KEYS,
+            "groups": GA15_HEADER_GROUPS,
+            "stats": {
+                "airport_name": airport_name,
+                "layout_ga15": True,
+                "records": len(records),
+                "indicators": n_data_lines,
+            },
+        }
+
+    def load_detail_data(self, mode: int, filters: Dict) -> Dict[str, Any]:
+        """Загружает данные для подробной таблицы"""
+        if mode == 1:  # MODE_AIRLINE
+            headers = ["ID", "Авиакомпания", "Код а/к", "Показатель", "Месяц", "Год", "Значение", "Ед. изм.", "Тип маршрута"]
+            attrs = [
+                'id', 'shipping.airline.name', 'shipping.airline.code',
+                'indicator.name', 'month', 'year', 'value',
+                'indicator.measure', 'shipping.route.type'
+            ]
+            records = AirlineIndicatorService.filter_indicators(filters) if filters else AirlineIndicatorService.get_all_indicators()
+        else:
+            headers = ["ID", "Аэропорт", "Код", "Показатель", "Месяц", "Год", "Значение", "Ед. изм.", "Нас. пункт"]
+            attrs = [
+                'id', 'airport.name', 'airport.code',
+                'indicator.name', 'month', 'year', 'value',
+                'indicator.measure', 'airport.locality.name'
+            ]
+            records = AirportIndicatorService.filter_indicators(filters) if filters else AirportIndicatorService.get_all_indicators()
+        
+        return {
+            'headers': headers,
+            'attrs': attrs,
+            'records': records
+        }
