@@ -3,7 +3,7 @@ from typing import List, Optional
 
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.orm import Mapped, mapped_column, relationship, declarative_base
-from sqlalchemy import ForeignKey, Index, Integer, String, ForeignKey, Float, DateTime, DECIMAL
+from sqlalchemy import Boolean, ForeignKey, Index, Integer, String, ForeignKey, Float, DateTime, DECIMAL
 from datetime import datetime
 from db.models.enums import RouteType, UserPosition, ShippingRegularity, Months
 
@@ -27,8 +27,14 @@ class Airport(Base):
     # RESTRICT: правка справочника населённых пунктов не должна стирать отчётность аэропорта
     locality_id: Mapped[int] = mapped_column(ForeignKey('airport_localities.id', ondelete='RESTRICT'))
     locality: Mapped["Locality"] = relationship("Locality", back_populates="airports")
+    # Вывод из работы вместо удаления: запись остаётся вместе со всей отчётностью,
+    # но не предлагается при выборе предприятия (SCH-10).
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default='1')
 
-    indicators: Mapped[List["AirportIndicators"]] = relationship("AirportIndicators", back_populates="airport", cascade="all, delete-orphan", passive_deletes=True)
+    # Без каскада: аэропорт с отчётностью удалить нельзя, это запрещает БД
+    # (ondelete='RESTRICT'). Удаление одной строки справочника не должно уносить
+    # накопленные за годы отчёты — для этого есть is_active.
+    indicators: Mapped[List["AirportIndicators"]] = relationship("AirportIndicators", back_populates="airport", passive_deletes="all")
 
 class Locality(Base):
     __tablename__ = 'airport_localities'
@@ -46,8 +52,12 @@ class Airline(Base):
     id: Mapped[int] = mapped_column(primary_key=True, unique=True, autoincrement=True)
     code: Mapped[str] = mapped_column(String(5), unique=True)
     name: Mapped[str] = mapped_column(String(50))
+    # См. Airport.is_active — вывод предприятия из работы без потери истории (SCH-10).
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default='1')
 
-    shippings = relationship("Shipping", back_populates="airline", cascade="all, delete-orphan", passive_deletes=True)
+    # Без каскада: авиакомпания с рейсами удаляться не должна — за рейсами стоит
+    # вся её отчётность (ondelete='RESTRICT' на shipping.airline_id).
+    shippings = relationship("Shipping", back_populates="airline", passive_deletes="all")
 
 class Shipping(Base):
     __tablename__ = 'shipping'
@@ -58,7 +68,7 @@ class Shipping(Base):
     id: Mapped[int] = mapped_column(primary_key=True, unique=True, autoincrement=True)
     route_id: Mapped[int] = mapped_column(ForeignKey('routes.id', ondelete='RESTRICT'))
     route: Mapped["Route"] = relationship("Route")
-    airline_id: Mapped[int] = mapped_column(ForeignKey('airlines.id', ondelete='CASCADE'))
+    airline_id: Mapped[int] = mapped_column(ForeignKey('airlines.id', ondelete='RESTRICT'))
     airline: Mapped["Airline"] = relationship("Airline", back_populates="shippings")
 
     indicators: Mapped[List["AirlineIndicators"]] = relationship("AirlineIndicators", back_populates="shipping", cascade="all, delete-orphan", passive_deletes=True)
@@ -119,7 +129,7 @@ class AirportIndicators(Base):
     id: Mapped[int] = mapped_column(primary_key=True, unique=True, autoincrement=True)
     indicator_id: Mapped[int] = mapped_column(ForeignKey('indicators.id', ondelete='RESTRICT'))
     indicator: Mapped["Indicator"] = relationship("Indicator")
-    airport_id: Mapped[int] = mapped_column(ForeignKey('airports.id', ondelete='CASCADE'))
+    airport_id: Mapped[int] = mapped_column(ForeignKey('airports.id', ondelete='RESTRICT'))
     airport: Mapped["Airport"] = relationship("Airport", back_populates="indicators")
     month: Mapped[Months]
     year: Mapped[int] = mapped_column(Integer, default=2025)
