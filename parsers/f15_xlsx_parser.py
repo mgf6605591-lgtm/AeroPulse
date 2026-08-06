@@ -39,7 +39,8 @@ F15_SHEET_MARKERS = (
 )
 F15_SHEET_MARKERS_REQUIRED = 4
 
-# Графа 2 бланка — номер строки.
+# Графа 1 бланка — вид перевозок, графа 2 — номер строки.
+ROW_TITLE_COL = 0
 ROW_NUMBER_COL = 1
 
 # Отчётный период листа данных: «за __февраль_2026__г.».
@@ -147,6 +148,8 @@ class F15XLSXParser(BaseParser):
             row_number = cls._row_number(df.iloc[r, ROW_NUMBER_COL])
             if row_number is None:
                 continue
+            if not cls._is_data_row(df.iloc[r, ROW_TITLE_COL]):
+                continue
             rcode = row_number * 10
             rc = F15_XML_ROW_TO_RC.get(rcode)
             if not rc:
@@ -172,6 +175,23 @@ class F15XLSXParser(BaseParser):
                 )
 
         return out
+
+    @staticmethod
+    def _is_data_row(raw) -> bool:
+        """Строка данных названа видом перевозок; строка нумерации граф — нет.
+
+        Под шапкой бланка идёт служебная строка «1|2|3|…|13», нумерующая графы.
+        В её графе 2 стоит число 2, и по одному лишь номеру она неотличима от
+        строки 02 «Международные нерегулярные»: числа 3…13 попадали в базу как
+        показатели этой строки, а настоящая строка 02 затем часть из них
+        перезаписывала. Признак — вид перевозок словами, а не цифра.
+        """
+        if raw is None or (isinstance(raw, float) and pd.isna(raw)):
+            return False
+        text = str(raw).strip()
+        if not text:
+            return False
+        return not text.replace(",", ".").replace(".", "").isdigit()
 
     @staticmethod
     def _row_number(raw) -> Optional[int]:
