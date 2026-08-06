@@ -98,10 +98,8 @@ class XMLParser(BaseParser):
 
         month_res = month or cls._month_from_period(period) or cls._month_from_meta_filename(file_name)
         year_res = year if year is not None else file_year
-        if not month_res:
-            month_res = "January"
-        if not year_res:
-            year_res = 2025
+        # Заглушек «январь 2025» здесь нет: неопределённый период возвращается как None,
+        # решение принимает вызывающий код (DATA-2).
 
         indicators = cls._extract_indicators(root)
 
