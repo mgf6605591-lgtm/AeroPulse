@@ -119,8 +119,15 @@ class FilterWidget(QGroupBox):
         self.route_btn.clear_selection()
 
     def _set_default_period(self):
-        min_year, max_year, _, _ = self.filter_controller.get_period_range()
-        self._set_combo_value(self.from_year, min_year)
+        """Умолчание — последний год, за который есть данные.
+
+        Прежде брался весь диапазон, от минимального года до максимального. Пока
+        одноимённые месяцы разных лет схлопывались в одну колонку (DATA-1), это и
+        был спусковой крючок ошибки — она срабатывала сразу при открытии. Теперь
+        колонки раздельные, и тот же диапазон дал бы 24+ колонки на старте.
+        """
+        _, max_year, _, _ = self.filter_controller.get_period_range()
+        self._set_combo_value(self.from_year, max_year)
         self._set_combo_value(self.to_year, max_year)
         self._set_combo_value(self.from_month, "January")
         self._set_combo_value(self.to_month, "December")

@@ -94,8 +94,10 @@ class AirportFilterWidget(QGroupBox):
         self.indicator_btn.set_items(items)
         self.indicator_btn.clear_selection()
 
-        min_year, max_year, _, _ = self.filter_controller.get_period_range()
-        self._set_combo_value(self.from_year, min_year)
+        # Умолчание — последний год с данными, а не весь их диапазон: раздельные
+        # колонки по годам (DATA-1) иначе дали бы 24+ колонки при открытии.
+        _, max_year, _, _ = self.filter_controller.get_period_range()
+        self._set_combo_value(self.from_year, max_year)
         self._set_combo_value(self.to_year, max_year)
         self._set_combo_value(self.from_month, "January")
         self._set_combo_value(self.to_month, "December")
@@ -130,8 +132,9 @@ class AirportFilterWidget(QGroupBox):
     def reset_filters(self):
         self.airport_combo.setCurrentIndex(0)
         self.indicator_btn.clear_selection()
-        min_year, max_year, _, _ = self.filter_controller.get_period_range()
-        self._set_combo_value(self.from_year, min_year)
+        # Сброс возвращает то же умолчание, что и первое открытие.
+        _, max_year, _, _ = self.filter_controller.get_period_range()
+        self._set_combo_value(self.from_year, max_year)
         self._set_combo_value(self.to_year, max_year)
         self._set_combo_value(self.from_month, "January")
         self._set_combo_value(self.to_month, "December")
