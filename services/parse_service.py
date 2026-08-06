@@ -3,6 +3,7 @@ import xml.etree.ElementTree as ET
 from parsers.xlsx_parser import XLSXParser
 from parsers.xml_parser import XMLParser
 from parsers.f15_xml_parser import F15XMLParser
+from parsers.f15_xlsx_parser import F15XLSXParser
 
 
 class ParseService:
@@ -26,9 +27,13 @@ class ParseService:
             dict: структурированные данные для импорта
         """
         if file_path.endswith(('.xlsx', '.xls')):
-            return XLSXParser.parse_file(
-                file_path, 
-                month=month, 
+            # Форма выбирается по содержимому книги, а не по тому, что указал
+            # пользователь: раньше любой XLSX разбирался раскладкой 12-ГА, и бланк
+            # аэропорта молча попадал в отчётность авиакомпании и наоборот (DATA-6).
+            parser = F15XLSXParser if F15XLSXParser.is_f15_workbook(file_path) else XLSXParser
+            return parser.parse_file(
+                file_path,
+                month=month,
                 year=year,
                 entity_type=entity_type,
                 entity_id=entity_id,
