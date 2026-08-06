@@ -8,6 +8,7 @@ from db.models.entities import (
     AirlineIndicators, AirportIndicators, Locality
 )
 from db.models.enums import ShippingRegularity, RouteType, Months
+from utils.constants import GA12_DETAIL_TON_PARENT
 import time
 
 
@@ -65,6 +66,32 @@ class DataImporter:
         return {'success': False, 'message': 'Не удалось выполнить импорт'}
 
     @classmethod
+    def _link_detail_indicators(cls, session) -> None:
+        """Связывает детализацию тоннокилометража с родительской строкой бланка.
+
+        parent_id нужен своду 12-ГА для подраздела «в том числе», а парсеры его не
+        передают. Вызывается после создания всех показателей файла: родитель может
+        быть создан в этом же импорте.
+        """
+        parent_ids = {
+            code: ind_id
+            for code, ind_id in session.query(Indicator.code, Indicator.id).filter(
+                Indicator.code.in_(sorted(set(GA12_DETAIL_TON_PARENT.values())))
+            )
+        }
+        if not parent_ids:
+            return
+
+        details = session.query(Indicator).filter(
+            Indicator.code.in_(list(GA12_DETAIL_TON_PARENT)),
+            Indicator.parent_id.is_(None),
+        )
+        for detail in details:
+            parent_id = parent_ids.get(GA12_DETAIL_TON_PARENT[detail.code])
+            if parent_id is not None:
+                detail.parent_id = parent_id
+
+    @classmethod
     def _import_airline_data(cls, session, data: dict) -> dict:
         """Импорт данных для авиакомпаний"""
         try:
@@ -99,7 +126,9 @@ class DataImporter:
                     session.flush()
                 
                 indicators_map[(code, name)] = indicator
-            
+
+            cls._link_detail_indicators(session)
+
             # Получаем авиакомпанию
             airline_data = data.get('airline', {})
             airline_id = data.get('entity_id') or airline_data.get('id')
@@ -295,7 +324,9 @@ class DataImporter:
                     session.flush()
                 
                 indicators_map[(code, name)] = indicator
-            
+
+            cls._link_detail_indicators(session)
+
             # Получаем аэропорт
             airport_data = data.get('airport', {})
             airport_id = data.get('entity_id') or airport_data.get('id')

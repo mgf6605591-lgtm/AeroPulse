@@ -56,6 +56,9 @@ GA12_SUBHEADING_VTOM = '      в том числе:'
 GA12_DETAIL_TON_CODES = ('450пас', '450гр', '450пч')
 # Родительские строки «Выполненный тоннокилометраж» по разделам бланка (связь в indicators.parent_id)
 GA12_TON_PARENT_CODES = frozenset({'450', '450н', '450нк'})
+# Строка детализации → её родитель. Бланк даёт детализацию только для регулярных перевозок,
+# поэтому родитель у всех трёх один — 450. Связь проставляет импортёр.
+GA12_DETAIL_TON_PARENT = {code: '450' for code in GA12_DETAIL_TON_CODES}
 
 MODE_AIRLINE = 1
 MODE_AIRPORT = 2
