@@ -1,5 +1,8 @@
 # forms/widgets/import_dialog.py
-from PyQt6.QtWidgets import QDialog, QFormLayout, QComboBox, QLabel, QDialogButtonBox
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import (
+    QComboBox, QDialog, QDialogButtonBox, QFormLayout, QLabel, QMessageBox
+)
 
 
 class ImportDialog(QDialog):
@@ -29,8 +32,9 @@ class ImportDialog(QDialog):
         
         # Информационная метка
         info = QLabel(
-            "Месяц и год для каждого файла берутся автоматически с листа «Титул», ячейка D13.\n"
-            "При необходимости год дополнительно определяется по форме ГА12."
+            "Месяц и год для каждого файла берутся с листа «Титул», ячейка D13.\n"
+            "Если период прочитать не удалось, программа спросит его отдельно "
+            "по каждому такому файлу."
         )
         info.setStyleSheet("color: gray; font-size: 11px;")
         layout.addRow(info)
@@ -62,6 +66,32 @@ class ImportDialog(QDialog):
         for entity_id, entity_name in entities:
             self.entity_combo.addItem(entity_name, entity_id)
     
+    def accept(self):
+        """Пропускает дальше только предприятие, действительно выбранное из списка.
+
+        Комбобокс редактируемый ради поиска набором с клавиатуры, но при вводе
+        названия, которого в списке нет, currentIndex остаётся на прежнем элементе:
+        get_entity_id() возвращал ID ранее выбранного предприятия, а пользователь
+        видел набранный им текст — и отчёт уходил в чужую отчётность (BUG-19).
+        """
+        text = self.entity_combo.currentText().strip()
+        index = self.entity_combo.findText(text, Qt.MatchFlag.MatchFixedString)
+        if index < 0 or self.entity_combo.itemData(index) is None:
+            QMessageBox.warning(
+                self,
+                "Предприятие не выбрано",
+                f"«{text}» нет в списке предприятий.\n\n"
+                "Выберите предприятие из списка: импорт возможен только в то, "
+                "которое уже заведено в справочнике."
+                if text else
+                "Выберите предприятие из списка.",
+            )
+            return
+        # Текст и выбранный элемент приводятся в соответствие, чтобы ID и название
+        # дальше по цепочке относились к одному и тому же предприятию.
+        self.entity_combo.setCurrentIndex(index)
+        super().accept()
+
     def get_type(self) -> str:
         """Возвращает тип предприятия ('airline' или 'airport')"""
         return self.type_combo.currentData()
