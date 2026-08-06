@@ -1,9 +1,9 @@
 from logging.config import fileConfig
-from sqlalchemy import engine_from_config
-from sqlalchemy import pool
+
+from sqlalchemy import create_engine, event, pool
 from alembic import context
 
-
+from db.database import DB_URL
 from db.models.entities import Base
 
 
@@ -18,14 +18,36 @@ if config.config_file_name is not None:
 
 # add your model's MetaData object here
 # for 'autogenerate' support
-# from myapp import mymodel
-# target_metadata = mymodel.Base.metadata
 target_metadata = Base.metadata
 
-# other values from the config, defined by the needs of env.py,
-# can be acquired:
-# my_important_option = config.get_main_option("my_important_option")
-# ... etc.
+
+def _db_url() -> str:
+    """URL целевой БД: из вызова программно, иначе из db.database.
+
+    Из alembic.ini URL не берётся сознательно — там он относительный, и alembic,
+    запущенный не из корня проекта, создал бы вторую пустую БД.
+    """
+    return config.attributes.get("db_url") or DB_URL
+
+
+def _migration_engine():
+    """Отдельный движок для миграций.
+
+    Внешние ключи на время миграций выключены: render_as_batch пересоздаёт таблицу
+    через временную копию, и при включённой проверке ссылки дочерних таблиц уехали бы
+    на неё. Целостность проверяется явно после прогона.
+    """
+    engine = create_engine(_db_url(), poolclass=pool.NullPool)
+
+    @event.listens_for(engine, "connect")
+    def _fk_off(dbapi_conn, _connection_record):
+        cursor = dbapi_conn.cursor()
+        try:
+            cursor.execute("PRAGMA foreign_keys=OFF")
+        finally:
+            cursor.close()
+
+    return engine
 
 
 def run_migrations_offline() -> None:
@@ -40,9 +62,8 @@ def run_migrations_offline() -> None:
     script output.
 
     """
-    url = config.get_main_option("sqlalchemy.url")
     context.configure(
-        url=url,
+        url=_db_url(),
         target_metadata=target_metadata,
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
@@ -59,21 +80,23 @@ def run_migrations_online() -> None:
     and associate a connection with the context.
 
     """
-    connectable = engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
-    )
+    connectable = _migration_engine()
 
     with connectable.connect() as connection:
         context.configure(
-            connection=connection, 
+            connection=connection,
             target_metadata=target_metadata,
-            render_as_batch=True
+            render_as_batch=True,
         )
 
         with context.begin_transaction():
             context.run_migrations()
+
+        broken = connection.exec_driver_sql("PRAGMA foreign_key_check").fetchall()
+        if broken:
+            raise RuntimeError(
+                f"После миграции нарушена ссылочная целостность: {broken}"
+            )
 
 
 if context.is_offline_mode():

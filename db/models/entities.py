@@ -3,7 +3,7 @@ from typing import List, Optional
 
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.orm import Mapped, mapped_column, relationship, declarative_base
-from sqlalchemy import ForeignKey, Integer, String, ForeignKey, Float, DateTime, DECIMAL
+from sqlalchemy import ForeignKey, Index, Integer, String, ForeignKey, Float, DateTime, DECIMAL
 from datetime import datetime
 from db.models.enums import RouteType, UserPosition, ShippingRegularity, Months
 
@@ -24,10 +24,11 @@ class Airport(Base):
     id: Mapped[int] = mapped_column(primary_key=True)
     code: Mapped[str] = mapped_column(String(5), unique=True)
     name: Mapped[str] = mapped_column(String(25))
-    locality_id: Mapped[int] = mapped_column(ForeignKey('airport_localities.id'))
+    # RESTRICT: правка справочника населённых пунктов не должна стирать отчётность аэропорта
+    locality_id: Mapped[int] = mapped_column(ForeignKey('airport_localities.id', ondelete='RESTRICT'))
     locality: Mapped["Locality"] = relationship("Locality", back_populates="airports")
 
-    indicators: Mapped[List["AirportIndicators"]] = relationship("AirportIndicators", back_populates="airport", cascade="all, delete-orphan")
+    indicators: Mapped[List["AirportIndicators"]] = relationship("AirportIndicators", back_populates="airport", cascade="all, delete-orphan", passive_deletes=True)
 
 class Locality(Base):
     __tablename__ = 'airport_localities'
@@ -35,7 +36,8 @@ class Locality(Base):
     id: Mapped[int] = mapped_column(primary_key=True, unique=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(50), unique=True)
 
-    airports = relationship("Airport", back_populates="locality", cascade="all, delete-orphan")
+    # Без каскада: удаление населённого пункта с аэропортами запрещает БД (ondelete='RESTRICT')
+    airports = relationship("Airport", back_populates="locality", passive_deletes="all")
 
 
 class Airline(Base):
@@ -45,21 +47,27 @@ class Airline(Base):
     code: Mapped[str] = mapped_column(String(5), unique=True)
     name: Mapped[str] = mapped_column(String(50))
 
-    shippings = relationship("Shipping", back_populates="airline", cascade="all, delete-orphan")
+    shippings = relationship("Shipping", back_populates="airline", cascade="all, delete-orphan", passive_deletes=True)
 
 class Shipping(Base):
     __tablename__ = 'shipping'
+    __table_args__ = (
+        Index('uq_shipping_airline_route', 'airline_id', 'route_id', unique=True),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True, unique=True, autoincrement=True)
-    route_id: Mapped[int] = mapped_column(ForeignKey('routes.id'))
+    route_id: Mapped[int] = mapped_column(ForeignKey('routes.id', ondelete='RESTRICT'))
     route: Mapped["Route"] = relationship("Route")
-    airline_id: Mapped[int] = mapped_column(ForeignKey('airlines.id'))
+    airline_id: Mapped[int] = mapped_column(ForeignKey('airlines.id', ondelete='CASCADE'))
     airline: Mapped["Airline"] = relationship("Airline", back_populates="shippings")
 
-    indicators: Mapped[List["AirlineIndicators"]] = relationship("AirlineIndicators", back_populates="shipping")
+    indicators: Mapped[List["AirlineIndicators"]] = relationship("AirlineIndicators", back_populates="shipping", cascade="all, delete-orphan", passive_deletes=True)
 
 class Route(Base):
     __tablename__ = 'routes'
+    __table_args__ = (
+        Index('uq_routes_type_regularity', 'type', 'regularity', unique=True),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True, unique=True, autoincrement=True)
     type: Mapped[RouteType]
@@ -67,11 +75,16 @@ class Route(Base):
 
 class AirlineIndicators(Base):
     __tablename__ = 'airlineInd'
+    # Ключ отчётной строки: один показатель на рейс за месяц. Он же ускоряет
+    # поиск существующей записи при импорте.
+    __table_args__ = (
+        Index('uq_airline_ind_period', 'indicator_id', 'shipping_id', 'month', 'year', unique=True),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True, unique=True, autoincrement=True)
-    indicator_id: Mapped[int] = mapped_column(ForeignKey('indicators.id'))
+    indicator_id: Mapped[int] = mapped_column(ForeignKey('indicators.id', ondelete='RESTRICT'))
     indicator: Mapped["Indicator"] = relationship("Indicator")
-    shipping_id: Mapped[int] = mapped_column(ForeignKey('shipping.id'))
+    shipping_id: Mapped[int] = mapped_column(ForeignKey('shipping.id', ondelete='CASCADE'))
     shipping: Mapped["Shipping"] = relationship("Shipping", back_populates="indicators")
     month: Mapped[Months]
     year: Mapped[int] = mapped_column(Integer, default=2025)
@@ -85,7 +98,7 @@ class Indicator(Base):
     code: Mapped[str] = mapped_column(String(20), unique=True)
     measure: Mapped[str] = mapped_column(String(20))
     # Детализация показателя (напр. 450пас → родитель 450 «Выполненный тоннокилометраж»)
-    parent_id: Mapped[Optional[int]] = mapped_column(ForeignKey('indicators.id'), nullable=True)
+    parent_id: Mapped[Optional[int]] = mapped_column(ForeignKey('indicators.id', ondelete='SET NULL'), nullable=True)
     parent: Mapped[Optional["Indicator"]] = relationship(
         "Indicator",
         remote_side="Indicator.id",
@@ -98,11 +111,15 @@ class Indicator(Base):
 
 class AirportIndicators(Base):
     __tablename__ = 'airportInd'
+    # Ключ отчётной строки: один показатель на аэропорт за месяц.
+    __table_args__ = (
+        Index('uq_airport_ind_period', 'indicator_id', 'airport_id', 'month', 'year', unique=True),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True, unique=True, autoincrement=True)
-    indicator_id: Mapped[int] = mapped_column(ForeignKey('indicators.id'))
+    indicator_id: Mapped[int] = mapped_column(ForeignKey('indicators.id', ondelete='RESTRICT'))
     indicator: Mapped["Indicator"] = relationship("Indicator")
-    airport_id: Mapped[int] = mapped_column(ForeignKey('airports.id'))
+    airport_id: Mapped[int] = mapped_column(ForeignKey('airports.id', ondelete='CASCADE'))
     airport: Mapped["Airport"] = relationship("Airport", back_populates="indicators")
     month: Mapped[Months]
     year: Mapped[int] = mapped_column(Integer, default=2025)

@@ -1,8 +1,16 @@
-"""init
+"""baseline: схема, фактически работавшая до перехода на Alembic
 
-Revision ID: 7f5a0bf5d509
-Revises: 
-Create Date: 2026-03-12 14:51:20.096049
+Слепок схемы, которую создавал Base.metadata.create_all() вместе с ручными
+ALTER'ами в init_db(). Отличий от модели на момент создания нет (проверено
+alembic.autogenerate.compare_metadata), поэтому существующие установки
+переводятся на эту ревизию через `alembic stamp` без пересоздания таблиц.
+
+Улучшения схемы (уникальные ключи, ON DELETE) идут отдельной ревизией — так
+они применяются и к новым, и к уже существующим базам.
+
+Revision ID: 9d180a1255ac
+Revises:
+Create Date: 2026-08-06 20:21:43.560908
 
 """
 from typing import Sequence, Union
@@ -12,7 +20,7 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = '7f5a0bf5d509'
+revision: str = '9d180a1255ac'
 down_revision: Union[str, Sequence[str], None] = None
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
@@ -41,13 +49,15 @@ def upgrade() -> None:
     sa.Column('name', sa.String(length=50), nullable=False),
     sa.Column('code', sa.String(length=20), nullable=False),
     sa.Column('measure', sa.String(length=20), nullable=False),
+    sa.Column('parent_id', sa.Integer(), nullable=True),
+    sa.ForeignKeyConstraint(['parent_id'], ['indicators.id'], ),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('code'),
     sa.UniqueConstraint('id')
     )
     op.create_table('routes',
     sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
-    sa.Column('type', sa.Enum('trunk', 'local', 'interregional', 'intra_regional', name='routetype'), nullable=False),
+    sa.Column('type', sa.Enum('trunk', 'local', 'interregional', 'subsidir', name='routetype'), nullable=False),
     sa.Column('regularity', sa.Enum('regular', 'irregular', 'non_commercial', name='shippingregularity'), nullable=False),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('id')
@@ -85,6 +95,7 @@ def upgrade() -> None:
     sa.Column('indicator_id', sa.Integer(), nullable=False),
     sa.Column('shipping_id', sa.Integer(), nullable=False),
     sa.Column('month', sa.Enum('January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December', name='months'), nullable=False),
+    sa.Column('year', sa.Integer(), nullable=False),
     sa.Column('value', sa.DECIMAL(), nullable=False),
     sa.ForeignKeyConstraint(['indicator_id'], ['indicators.id'], ),
     sa.ForeignKeyConstraint(['shipping_id'], ['shipping.id'], ),
@@ -93,16 +104,15 @@ def upgrade() -> None:
     )
     op.create_table('airportInd',
     sa.Column('id', sa.Integer(), autoincrement=True, nullable=False),
-    sa.Column('name', sa.String(length=50), nullable=False),
     sa.Column('indicator_id', sa.Integer(), nullable=False),
     sa.Column('airport_id', sa.Integer(), nullable=False),
     sa.Column('month', sa.Enum('January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December', name='months'), nullable=False),
+    sa.Column('year', sa.Integer(), nullable=False),
     sa.Column('value', sa.DECIMAL(), nullable=False),
     sa.ForeignKeyConstraint(['airport_id'], ['airports.id'], ),
     sa.ForeignKeyConstraint(['indicator_id'], ['indicators.id'], ),
     sa.PrimaryKeyConstraint('id'),
-    sa.UniqueConstraint('id'),
-    sa.UniqueConstraint('name')
+    sa.UniqueConstraint('id')
     )
     # ### end Alembic commands ###
 
