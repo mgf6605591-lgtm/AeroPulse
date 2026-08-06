@@ -65,7 +65,7 @@ class LegacyDatabaseTest(TempDbCase):
 
         upgrade_to_head(self.engine)
 
-        self.assertIn("ON DELETE CASCADE", table_ddl(self.engine, "airportInd"))
+        self.assertIn("ON DELETE RESTRICT", table_ddl(self.engine, "airportInd"))
         self.assertIsNotNone(table_ddl(self.engine, "uq_airport_ind_period"))
 
     def test_restores_columns_added_by_old_init_db(self):

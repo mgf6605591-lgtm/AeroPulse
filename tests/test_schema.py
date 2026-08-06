@@ -47,17 +47,28 @@ class ForeignKeyTest(MigratedDbCase):
         with self.assertRaises(IntegrityError):
             self.execute("DELETE FROM indicators WHERE id = 1")
 
-    def test_deleting_airport_removes_its_reports(self):
-        self.execute(AIRPORT_ROW, indicator_id=1, month="January")
-        self.execute("DELETE FROM airports WHERE id = 1")
-        self.assertEqual(0, scalar(self.engine, "SELECT count(*) FROM airportInd"))
+    def test_airport_with_reports_not_deletable(self):
+        """Удаление аэропорта не должно уносить накопленную отчётность (SCH-10).
 
-    def test_deleting_airline_removes_shipping_and_reports(self):
-        """Каскад через рейсы: раньше показатели оставались висеть без владельца."""
+        Прежде здесь стоял каскад, и одна строка справочника забирала с собой
+        отчёты за все периоды. Вместо удаления такую запись помечают неактивной.
+        """
+        self.execute(AIRPORT_ROW, indicator_id=1, month="January")
+        with self.assertRaises(IntegrityError):
+            self.execute("DELETE FROM airports WHERE id = 1")
+        self.assertEqual(1, scalar(self.engine, "SELECT count(*) FROM airportInd"))
+
+    def test_airline_with_shipping_not_deletable(self):
+        """Запрет стоит на рейсах: рейс создаётся импортом, значит данные есть."""
         self.execute(AIRLINE_ROW, month="January")
-        self.execute("DELETE FROM airlines WHERE id = 1")
-        self.assertEqual(0, scalar(self.engine, "SELECT count(*) FROM shipping"))
-        self.assertEqual(0, scalar(self.engine, "SELECT count(*) FROM airlineInd"))
+        with self.assertRaises(IntegrityError):
+            self.execute("DELETE FROM airlines WHERE id = 1")
+        self.assertEqual(1, scalar(self.engine, "SELECT count(*) FROM airlineInd"))
+
+    def test_airport_without_reports_is_deletable(self):
+        """Ошибочно заведённая запись удаляется как раньше."""
+        self.execute("DELETE FROM airports WHERE id = 1")
+        self.assertEqual(0, scalar(self.engine, "SELECT count(*) FROM airports"))
 
     def test_deleting_parent_indicator_clears_detail_link(self):
         self.execute(

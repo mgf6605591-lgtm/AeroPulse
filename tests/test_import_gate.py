@@ -72,6 +72,10 @@ def make_f15_workbook(path, *, period="за февраль 2026 г.", with_value
     ws = wb.active
     ws.title = "15-ГА"
     ws.cell(row=1, column=1, value="Наименование аэропорта:  Тестовый аэропорт")
+    # Служебная строка нумерации граф — как в настоящем бланке. В её графе 2 стоит
+    # число 2, поэтому по одному номеру она неотличима от строки 02 формы.
+    for col in range(1, 14):
+        ws.cell(row=6, column=col, value=col)
     if period is not None:
         ws.cell(row=7, column=1, value=period)  # iloc (6, 0)
     ws.cell(row=8, column=1, value="Коммерческие перевозки")
@@ -135,6 +139,27 @@ class PeriodSubstitutionTest(WorkbookCase):
         result = F15XLSXParser.parse_file(make_f15_workbook(self.path("e.xlsx")))
         self.assertEqual(result["month"], "February")
         self.assertEqual(result["year"], 2026)
+
+
+class F15RowSelectionTest(WorkbookCase):
+    """Строка нумерации граф не должна попадать в данные."""
+
+    def test_column_number_row_is_not_a_data_row(self):
+        """В её графе 2 стоит 2 — по номеру она неотличима от строки 02 формы.
+
+        Разбиралась как строка 02, и номера граф 3…13 уходили в базу значениями
+        показателей; настоящая строка 02 затем часть из них перезаписывала.
+        """
+        result = F15XLSXParser.parse_file(make_f15_workbook(self.path("a.xlsx")))
+        values = {i["indicator_code"]: i["value"] for i in result["indicators"]}
+        # Строка 02 в фикстуре заполнена числом 2 по всем графам.
+        self.assertEqual(2, values["15ГА-R02-ВС"])
+        self.assertEqual(2, values["15ГА-R02-ПЧ_ВСЕГО"])
+
+    def test_no_duplicate_indicator_codes(self):
+        result = F15XLSXParser.parse_file(make_f15_workbook(self.path("b.xlsx")))
+        codes = [i["indicator_code"] for i in result["indicators"]]
+        self.assertEqual(len(codes), len(set(codes)))
 
 
 class FormDetectionTest(WorkbookCase):
@@ -339,6 +364,19 @@ class RealF15FileTest(unittest.TestCase):
         result = F15XLSXParser.parse_file(REAL_F15)
         codes = {i["indicator_code"] for i in result["indicators"]}
         self.assertNotIn("15ГА-R09-ПАС_ОТП", codes)
+
+    def test_no_duplicate_indicator_codes(self):
+        """Дубль означал бы, что в один ключ отчётности легли две строки файла."""
+        codes = [i["indicator_code"] for i in F15XLSXParser.parse_file(REAL_F15)["indicators"]]
+        self.assertEqual(len(codes), len(set(codes)))
+
+    def test_column_number_row_did_not_leak_into_data(self):
+        """В строке 02 бланка заполнены только графы «всего», и там нули."""
+        values = {
+            i["indicator_code"]: i["value"]
+            for i in F15XLSXParser.parse_file(REAL_F15)["indicators"]
+        }
+        self.assertEqual({0.0}, {v for k, v in values.items() if "-R02-" in k})
 
 
 if __name__ == "__main__":
