@@ -27,6 +27,7 @@ from forms.widgets.airport_filter_widget import AirportFilterWidget
 from forms.widgets.data_table_widget import DataTableWidget
 from forms.widgets.import_dialog import ImportDialog
 from forms.widgets.period_dialog import PeriodDialog
+from forms.widgets.reference_dialog import ReferenceDialog
 from utils.constants import MONTHS_RU, MODE_AIRLINE, MODE_AIRPORT
 
 
@@ -64,11 +65,15 @@ class MainWindow(QMainWindow):
         self.export_btn = QPushButton("Экспорт в XLSX")
         self.export_btn.clicked.connect(self.export_to_xlsx)
 
+        self.reference_btn = QPushButton("Справочники")
+        self.reference_btn.clicked.connect(self.open_references)
+
         self.exit_btn = QPushButton("Выход")
         self.exit_btn.clicked.connect(self.logout_action)
 
         toolbar.addWidget(self.import_btn)
         toolbar.addWidget(self.export_btn)
+        toolbar.addWidget(self.reference_btn)
         toolbar.addStretch()
         toolbar.addWidget(self.exit_btn)
 
@@ -214,6 +219,18 @@ class MainWindow(QMainWindow):
             QApplication.restoreOverrideCursor()
             QMessageBox.critical(self, "Ошибка импорта", str(e))
             traceback.print_exc()
+
+    def open_references(self):
+        """Окно ведения справочников.
+
+        После закрытия списки фильтров перечитываются: справочники могли измениться,
+        а FilterController кеширует их до явного сброса.
+        """
+        ReferenceDialog(self).exec()
+        self.filter_controller.clear_cache()
+        self.filter_widget_airline.reload_reference_lists()
+        self.airport_filter_widget.refresh_airport_list()
+        self._load_initial_data()
 
     def _import_with_asked_period(self, file_path, entity_type, entity_id, result: dict) -> dict:
         """Спрашивает период у пользователя и повторяет импорт файла.
