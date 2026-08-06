@@ -1,11 +1,11 @@
 from pathlib import Path
 
-from sqlalchemy import create_engine, event, select, text
+from sqlalchemy import create_engine, event, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool
 from contextlib import contextmanager
 
-from db.models.entities import Base, User
+from db.models.entities import User
 from db.models.enums import UserPosition
 from utils.paths import get_app_dir, is_frozen
 
@@ -63,38 +63,11 @@ def get_session():
 
 
 def init_db():
-    """Создание таблиц и миграция (одна транзакция — меньше конфликтов блокировок SQLite)."""
-    Base.metadata.create_all(engine)
-    with engine.begin() as conn:
-        result = conn.execute(text("PRAGMA table_info('airlineInd')"))
-        columns = [row[1] for row in result.fetchall()]
-        if "year" not in columns:
-            conn.execute(text("ALTER TABLE airlineInd ADD COLUMN year INTEGER DEFAULT 2025"))
+    """Схема приводится к актуальной версии миграциями — правки только через Alembic."""
+    # Локальный импорт: env.py миграций импортирует этот модуль.
+    from db.migrator import upgrade_to_head
 
-        result = conn.execute(text("PRAGMA table_info('airportInd')"))
-        columns = [row[1] for row in result.fetchall()]
-        if "year" not in columns:
-            conn.execute(text("ALTER TABLE airportInd ADD COLUMN year INTEGER DEFAULT 2025"))
-
-        result = conn.execute(text("PRAGMA table_info('indicators')"))
-        ind_cols = [row[1] for row in result.fetchall()]
-        if "parent_id" not in ind_cols:
-            conn.execute(
-                text(
-                    "ALTER TABLE indicators ADD COLUMN parent_id INTEGER REFERENCES indicators(id)"
-                )
-            )
-
-        conn.execute(
-            text("""
-            UPDATE indicators
-            SET parent_id = (SELECT id FROM indicators AS p WHERE p.code = '450' LIMIT 1)
-            WHERE code IN ('450пас', '450гр', '450пч')
-              AND parent_id IS NULL
-              AND EXISTS (SELECT 1 FROM indicators AS p WHERE p.code = '450')
-        """)
-        )
-
+    upgrade_to_head(engine)
     _seed_default_admin()
 
 
