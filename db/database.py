@@ -46,6 +46,9 @@ def _sqlite_pragmas(dbapi_conn, _connection_record):
         cursor.execute("PRAGMA journal_mode=WAL")
         cursor.execute("PRAGMA busy_timeout=60000")
         cursor.execute("PRAGMA synchronous=NORMAL")
+        # SQLite проверяет внешние ключи только когда это включено на соединении;
+        # без этого все FOREIGN KEY в схеме декоративны.
+        cursor.execute("PRAGMA foreign_keys=ON")
     finally:
         cursor.close()
 
