@@ -6,11 +6,25 @@ from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 from parsers.base_parser import BaseParser
+from parsers.xlsx_common import count_markers, find_sheet, sheet_names
 
 _MONTH_ENUM = [
     "January", "February", "March", "April", "May", "June",
     "July", "August", "September", "October", "November", "December",
 ]
+
+# Признаки бланка 12-ГА. Подписи взяты из раскладки показателей ниже в этом файле;
+# сверить с реальным бланком и при необходимости ужесточить порог — правится здесь,
+# в одном месте, не трогая логику разбора.
+GA12_SHEET_MARKERS = (
+    "самолето-километры",
+    "отправлений воздушных судов",
+    "налет часов",
+    "перевезено пассажиров",
+    "выполненный пассажирооборот",
+    "выполненный тоннокилометраж",
+)
+GA12_SHEET_MARKERS_REQUIRED = 4
 
 
 class XLSXParser(BaseParser):
@@ -30,8 +44,8 @@ class XLSXParser(BaseParser):
             entity_name: название предприятия (если не передано через entity_id)
         """
         title_month, title_year = cls._month_year_from_title_sheet(file_name)
-        df = cls._read_ga12_sheet(file_name)
-        
+        df, sheet_name = cls._read_ga12_sheet(file_name)
+
         # Используем переданное название предприятия или пытаемся извлечь из файла
         if entity_name:
             airline_name = entity_name
@@ -47,17 +61,18 @@ class XLSXParser(BaseParser):
         # Код авиакомпании (генерируем из названия)
         airline_code = airline_name[:3].upper() if airline_name else "UNK"
         
-        # Период: явные параметры вызова > лист «Титул» D13 > эвристика по ГА12
+        # Период: явные параметры вызова > лист «Титул» D13. Поиска «где-нибудь в шапке»
+        # больше нет: он подхватывал год из реквизитов бланка («приказ Росстата от 2019 г.»)
+        # и уводил отчёт в чужой период (DATA-3).
         if not month:
-            month = title_month or cls._detect_month_from_df(df)
+            month = title_month
         if not year:
-            year = title_year or cls._detect_year_from_df(df)
-        
-        if not month:
-            month = 'January'
-        if not year:
-            year = 2025
-        
+            year = title_year
+
+        # Заглушки «январь 2025» здесь больше нет: неопределённый период возвращается
+        # как None, и решение принимает вызывающий код — молча подставленный период
+        # затирал бы через upsert настоящие данные другого месяца (DATA-2).
+
         # Получаем показатели
         indicators = cls._get_indicators_from_df(df)
         
@@ -70,8 +85,13 @@ class XLSXParser(BaseParser):
         
         # Формируем результат
         result = {
+            # Форма, распознанная по содержимому файла, а не выбранная пользователем.
+            # Раньше XLSX не возвращал data_type вовсе, и проверка расхождения формы
+            # в ImportService сравнивала выбор пользователя сам с собой (DATA-6).
+            "data_type": "airline",
             "entity_type": entity_type or 'airline',
             "entity_id": entity_id,
+            "sheet_name": sheet_name,
             "airline": {
                 "name": airline_name,
                 "code": airline_code,
@@ -99,11 +119,11 @@ class XLSXParser(BaseParser):
     def _month_year_from_title_sheet(cls, file_name: str) -> Tuple[Optional[str], Optional[int]]:
         """Лист «Титул», ячейка D13 (строка 13, столбец D) — месяц и при наличии год."""
         try:
-            xl = pd.ExcelFile(file_name)
-            sheet = cls._find_title_sheet_name(xl)
-            if not sheet:
-                return None, None
-            df = pd.read_excel(file_name, sheet_name=sheet, header=None)
+            with pd.ExcelFile(file_name) as xl:
+                sheet = cls._find_title_sheet_name(xl)
+                if not sheet:
+                    return None, None
+                df = xl.parse(sheet_name=sheet, header=None)
             if df.shape[0] < 13 or df.shape[1] < 4:
                 return None, None
             raw = df.iloc[12, 3]
@@ -186,48 +206,29 @@ class XLSXParser(BaseParser):
         return None
 
     @classmethod
-    def _read_ga12_sheet(cls, file_name: str) -> pd.DataFrame:
-        """Читает лист формы 12-ГА: имя «ГА12» или первый подходящий лист."""
-        try:
-            return pd.read_excel(file_name, sheet_name="ГА12", header=None)
-        except ValueError:
-            xl = pd.ExcelFile(file_name)
-            for name in xl.sheet_names:
-                n = str(name).upper().replace(" ", "")
-                if "ГА12" in n or "12-ГА" in n or "12ГА" in n:
-                    return pd.read_excel(file_name, sheet_name=name, header=None)
-            return pd.read_excel(file_name, sheet_name=0, header=None)
-    
+    def _looks_like_ga12(cls, df: pd.DataFrame) -> bool:
+        """Опознаёт бланк 12-ГА по набору подписей показателей.
+
+        Требуется несколько совпадений сразу: отдельная подпись может встретиться
+        и в сопроводительном тексте, а полдесятка — только в самом бланке.
+        """
+        return count_markers(df, GA12_SHEET_MARKERS) >= GA12_SHEET_MARKERS_REQUIRED
+
     @classmethod
-    def _detect_month_from_df(cls, df: pd.DataFrame) -> Optional[str]:
-        """Определение месяца из DataFrame"""
-        month_map = {
-            'январ': 'January', 'феврал': 'February', 'март': 'March',
-            'апрел': 'April', 'май': 'May', 'мая': 'May', 'июн': 'June',
-            'июл': 'July', 'август': 'August', 'сентябр': 'September',
-            'октябр': 'October', 'ноябр': 'November', 'декабр': 'December',
-        }
-        
-        for r in range(min(10, len(df))):
-            for c in range(min(10, df.shape[1])):
-                val = str(df.iloc[r, c]) if not pd.isna(df.iloc[r, c]) else ""
-                val_lower = val.lower()
-                for key, month_val in month_map.items():
-                    if key in val_lower:
-                        return month_val
-        return None
-    
-    @classmethod
-    def _detect_year_from_df(cls, df: pd.DataFrame) -> Optional[int]:
-        """Определение года из DataFrame"""
-        import re
-        for r in range(min(10, len(df))):
-            for c in range(min(10, df.shape[1])):
-                val = str(df.iloc[r, c]) if not pd.isna(df.iloc[r, c]) else ""
-                matches = re.findall(r'20\d{2}', val)
-                if matches:
-                    return int(matches[0])
-        return None
+    def _read_ga12_sheet(cls, file_name: str) -> Tuple[pd.DataFrame, str]:
+        """Находит лист формы 12-ГА и возвращает его вместе с именем."""
+        df, name = find_sheet(file_name, cls._looks_like_ga12, cls._name_hints_ga12)
+        if df is None:
+            raise ValueError(
+                "Не удалось распознать форму: ни на одном листе книги "
+                f"({', '.join(sheet_names(file_name))}) нет показателей бланка 12-ГА."
+            )
+        return df, name
+
+    @staticmethod
+    def _name_hints_ga12(sheet_name: str) -> bool:
+        n = str(sheet_name).upper().replace(" ", "").replace("-", "")
+        return "ГА12" in n or "12ГА" in n
 
     @classmethod
     def _get_indicators_from_df(cls, df: pd.DataFrame) -> List[Dict]:
