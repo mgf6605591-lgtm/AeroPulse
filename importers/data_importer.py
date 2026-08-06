@@ -152,18 +152,10 @@ class DataImporter:
                         'message': f'Авиакомпания "{airline_name}" не найдена в базе данных. Пожалуйста, выберите существующую авиакомпанию.'
                     }
             
-            # Получаем месяц и год
-            month_name = data.get('month', 'January')
-            year = data.get('year', 2025)
-            
-            month_enum = None
-            for m in Months:
-                if m.name == month_name:
-                    month_enum = m
-                    break
-            if not month_enum:
-                month_enum = Months.January
-            
+            month_enum, year, period_error = cls._resolve_period(data)
+            if period_error:
+                return period_error
+
             total_imported = 0
             total_updated = 0
             
@@ -261,14 +253,9 @@ class DataImporter:
                     session.flush()
             
             session.commit()
-            
-            return {
-                'success': True,
-                'message': f'Импорт завершен. Добавлено: {total_imported}, Обновлено: {total_updated}',
-                'imported': total_imported,
-                'updated': total_updated
-            }
-            
+
+            return cls._import_result(total_imported, total_updated)
+
         except IntegrityError as e:
             session.rollback()
             return {
@@ -350,17 +337,10 @@ class DataImporter:
                         'message': f'Аэропорт "{airport_name}" не найден в базе данных. Пожалуйста, выберите существующий аэропорт.'
                     }
             
-            month_name = data.get('month', 'January')
-            year = data.get('year', 2025)
-            
-            month_enum = None
-            for m in Months:
-                if m.name == month_name:
-                    month_enum = m
-                    break
-            if not month_enum:
-                month_enum = Months.January
-            
+            month_enum, year, period_error = cls._resolve_period(data)
+            if period_error:
+                return period_error
+
             total_imported = 0
             total_updated = 0
             
@@ -404,17 +384,61 @@ class DataImporter:
                     session.flush()
             
             session.commit()
-            
-            return {
-                'success': True,
-                'message': f'Импорт завершен. Добавлено: {total_imported}, Обновлено: {total_updated}',
-                'imported': total_imported,
-                'updated': total_updated
-            }
-            
+
+            return cls._import_result(total_imported, total_updated)
+
         except Exception as e:
             session.rollback()
             return {
                 'success': False,
                 'message': f'Ошибка при импорте данных аэропорта: {str(e)}'
             }
+
+    @staticmethod
+    def _resolve_period(data: dict):
+        """Месяц и год разобранного файла. Умолчаний нет — только то, что в данных.
+
+        Прежде отсутствующий или нераспознанный месяц превращался здесь в
+        Months.January, а год — в 2025, уже после того как парсер делал ровно то же
+        самое. Импорт работает как upsert по ключу (показатель, рейс, месяц, год),
+        поэтому подстановка не просто помечала период неверно, а затирала настоящую
+        отчётность подставленного месяца (DATA-2).
+
+        Возвращает (month_enum, year, error): error заполнен, если период не определён.
+        """
+        month_name = data.get('month')
+        year = data.get('year')
+        month_enum = next((m for m in Months if m.name == month_name), None)
+        if month_enum is None or not year:
+            return None, None, {
+                'success': False,
+                'message': (
+                    f'Отчётный период не определён (месяц: {month_name!r}, '
+                    f'год: {year!r}). Импорт отменён, чтобы не затереть данные '
+                    'другого периода.'
+                ),
+            }
+        return month_enum, int(year), None
+
+    @staticmethod
+    def _import_result(total_imported: int, total_updated: int) -> dict:
+        """Итог импорта. Ноль записей — отказ, а не успех.
+
+        Разбор, не нашедший ни одного показателя, возвращал success=True с
+        «Добавлено: 0, Обновлено: 0», и окно показывало зелёное «Импорт завершён».
+        Пользователь был уверен, что отчёт загружен, хотя в базу не попало ничего;
+        обнаружиться это могло разве что при сверке итогов (DATA-4).
+        """
+        if total_imported == 0 and total_updated == 0:
+            return {
+                'success': False,
+                'message': 'Ни одного показателя не прочитано — в базу не записано ничего.',
+                'imported': 0,
+                'updated': 0,
+            }
+        return {
+            'success': True,
+            'message': f'Импорт завершен. Добавлено: {total_imported}, Обновлено: {total_updated}',
+            'imported': total_imported,
+            'updated': total_updated,
+        }

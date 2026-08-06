@@ -78,7 +78,17 @@ class ImportService:
                 'source_file': os.path.basename(file_path),
             }
 
-        parsed_type = data.get('data_type') or data.get('entity_type')
+        # Форма определяется только по содержимому файла. Прежний откат на entity_type
+        # сравнивал выбор пользователя сам с собой, поэтому расхождение не выявлялось
+        # никогда — как раз для XLSX, который не возвращал data_type вовсе (DATA-6).
+        parsed_type = data.get('data_type')
+        if not parsed_type:
+            return {
+                'success': False,
+                'message': 'Не удалось определить форму отчёта по содержимому файла. '
+                           'Импорт отменён, чтобы данные не попали в чужую форму.',
+                'source_file': os.path.basename(file_path),
+            }
         if entity_type == 'airport' and parsed_type == 'airline':
             return {
                 'success': False,
@@ -92,14 +102,29 @@ class ImportService:
                 'source_file': os.path.basename(file_path),
             }
 
+        # Отчётный период обязателен. Раньше парсер молча подставлял «январь 2025»,
+        # и upsert по ключу (показатель, рейс, месяц, год) затирал настоящие январские
+        # данные значениями чужого месяца — без резервной копии и следа в журнале (DATA-2).
+        if not data.get('month') or not data.get('year'):
+            return {
+                'success': False,
+                'period_required': True,
+                'message': 'Не удалось определить отчётный период файла '
+                           '(лист «Титул», ячейка D13).',
+                'source_file': os.path.basename(file_path),
+                'period_month': data.get('month'),
+                'period_year': data.get('year'),
+            }
+
         # Импорт данных (предприятие уже существует в БД, не создаем новое)
         with get_session() as session:
             result = DataImporter.import_data(session, data)
-        
+
         if isinstance(result, dict):
             result["source_file"] = os.path.basename(file_path)
             result["period_month"] = data.get("month")
             result["period_year"] = data.get("year")
+            result["sheet_name"] = data.get("sheet_name")
         return result
     
     @classmethod
