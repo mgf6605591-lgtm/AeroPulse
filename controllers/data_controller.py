@@ -37,6 +37,56 @@ from utils.ga15_airport_layout import (
 GA15_CODE_ALIASES: Dict[str, str] = {}
 
 
+def _record_period(rec) -> tuple:
+    """Период записи — пара (год, месяц).
+
+    Ключом группировки служил один месяц без года, поэтому январь 2024 и январь 2025
+    складывались в одну колонку с подписью «Январь»: отчёт выглядел правдоподобно и
+    был неверен, причём при диапазоне по умолчанию — сразу при открытии (DATA-1).
+    """
+    month = rec.month.name if hasattr(rec.month, "name") else str(rec.month)
+    return (rec.year, month)
+
+
+def _sorted_periods(periods: Set[tuple]) -> List[tuple]:
+    """Периоды в хронологическом порядке: сначала по году, затем по месяцу."""
+    def order(period: tuple) -> tuple:
+        year, month = period
+        month_index = MONTHS_LIST.index(month) if month in MONTHS_LIST else -1
+        return (year if year is not None else 0, month_index)
+
+    return sorted(periods, key=order)
+
+
+def _period_col_key(period: tuple) -> str:
+    """Часть ключа колонки, обозначающая период. Год входит в ключ обязательно."""
+    year, month = period
+    return f"{year}_{month}"
+
+
+def _period_label(period: tuple) -> str:
+    """Подпись колонки: «Январь 2025». Год указывается всегда, а не подразумевается."""
+    year, month = period
+    name = MONTHS_RU.get(month, month or "")
+    if not name:
+        return ""
+    return f"{name} {year}" if year is not None else name
+
+
+# Период-заглушка, когда в выборке нет ни одной записи.
+EMPTY_PERIOD: tuple = (None, None)
+
+
+def _period_count(periods: List[tuple]) -> int:
+    """Сколько периодов реально попало в свод.
+
+    Заглушка пустой выборки не считается. Проверять её через истинность нельзя:
+    кортеж (None, None) непустой и потому истинен — прежняя проверка `months[0]`
+    работала лишь потому, что заглушкой был сам None.
+    """
+    return 0 if list(periods) == [EMPTY_PERIOD] else len(periods)
+
+
 def _period_label_ru(filters: Optional[Dict]) -> str:
     if not filters:
         return "выбранный период"
@@ -277,22 +327,22 @@ class DataController:
         )
         measure_nocode: Dict[str, str] = {}
         airlines = set()
-        months_seen = set()
+        periods_seen: Set[tuple] = set()
 
         for rec in records:
             if not rec.indicator or not rec.shipping or not rec.shipping.airline:
                 continue
             airline_name = rec.shipping.airline.name.strip()
-            month_key = rec.month.name if hasattr(rec.month, 'name') else str(rec.month)
+            period = _record_period(rec)
             airlines.add(airline_name)
-            months_seen.add(month_key)
+            periods_seen.add(period)
             code = (rec.indicator.code or "").strip()
             if rec.value is not None:
                 if code:
-                    ind_by_code[code][month_key][airline_name] += rec.value
+                    ind_by_code[code][period][airline_name] += rec.value
                 else:
                     ind_name = rec.indicator.name.strip()
-                    ind_by_name_nocode[ind_name][month_key][airline_name] += rec.value
+                    ind_by_name_nocode[ind_name][period][airline_name] += rec.value
                     measure_nocode[ind_name] = (rec.indicator.measure or "").strip()
 
         with get_session() as session:
@@ -303,27 +353,25 @@ class DataController:
             }
 
         airlines = sorted(airlines)
-        months = [m for m in MONTHS_LIST if m in months_seen]
-        if not months:
-            months = [None]
+        periods = _sorted_periods(periods_seen) or [EMPTY_PERIOD]
 
         headers = ["Показатель", "Ед. изм.", "Код ОКЕИ"]
         keys = ["indicator", "measure", "code"]
         groups = []
 
         col = len(headers)
-        for month_key in months:
+        for period in periods:
             first = col
+            pk = _period_col_key(period)
             headers.append("Свод")
-            keys.append(f"m_{month_key}_total")
+            keys.append(f"m_{pk}_total")
             col += 1
             for i, airline in enumerate(airlines):
                 headers.append(airline)
-                keys.append(f"m_{month_key}_a_{i}")
+                keys.append(f"m_{pk}_a_{i}")
                 col += 1
             last = col - 1
-            month_label = MONTHS_RU.get(month_key, month_key or "")
-            groups.append((first, last, month_label))
+            groups.append((first, last, _period_label(period)))
 
         known_codes = set(GA12_CODE_ORDER_FLAT)
 
@@ -337,16 +385,17 @@ class DataController:
                 "measure": (ind.measure or "").strip(),
                 "code": code,
             }
-            for month_key in months:
-                month_data = ind_by_code.get(code, {}).get(month_key, {})
+            for period in periods:
+                period_data = ind_by_code.get(code, {}).get(period, {})
+                pk = _period_col_key(period)
                 total = Decimal('0')
                 for airline in airlines:
-                    val = month_data.get(airline, Decimal('0'))
+                    val = period_data.get(airline, Decimal('0'))
                     total += val
-                row[f"m_{month_key}_total"] = _dec_to_float(total)
+                row[f"m_{pk}_total"] = _dec_to_float(total)
                 for i, airline in enumerate(airlines):
-                    val = month_data.get(airline, Decimal('0'))
-                    row[f"m_{month_key}_a_{i}"] = _dec_to_float(val)
+                    val = period_data.get(airline, Decimal('0'))
+                    row[f"m_{pk}_a_{i}"] = _dec_to_float(val)
             return row
 
         def data_row_for_name_nocode(ind_name: str) -> Dict[str, Any]:
@@ -355,16 +404,17 @@ class DataController:
                 "measure": measure_nocode.get(ind_name, ""),
                 "code": "",
             }
-            for month_key in months:
-                month_data = ind_by_name_nocode.get(ind_name, {}).get(month_key, {})
+            for period in periods:
+                period_data = ind_by_name_nocode.get(ind_name, {}).get(period, {})
+                pk = _period_col_key(period)
                 total = Decimal('0')
                 for airline in airlines:
-                    val = month_data.get(airline, Decimal('0'))
+                    val = period_data.get(airline, Decimal('0'))
                     total += val
-                row[f"m_{month_key}_total"] = _dec_to_float(total)
+                row[f"m_{pk}_total"] = _dec_to_float(total)
                 for i, airline in enumerate(airlines):
-                    val = month_data.get(airline, Decimal('0'))
-                    row[f"m_{month_key}_a_{i}"] = _dec_to_float(val)
+                    val = period_data.get(airline, Decimal('0'))
+                    row[f"m_{pk}_a_{i}"] = _dec_to_float(val)
             return row
 
         pivot_rows = []
@@ -408,7 +458,7 @@ class DataController:
             'stats': {
                 'indicators': n_data_rows,
                 'airlines': len(airlines),
-                'months': len(months) if months[0] else 0,
+                'months': _period_count(periods),
                 'records': len(records)
             }
         }
@@ -418,7 +468,7 @@ class DataController:
     ) -> Dict[str, Any]:
         """Общая сетка 12-ГА: месяцы × виды маршрута + «Всего» (данные уже отфильтрованы по АК)."""
         data = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: Decimal("0"))))
-        months_seen: set = set()
+        periods_seen: Set[tuple] = set()
 
         for rec in records:
             if not rec.indicator or not rec.shipping or not rec.shipping.route:
@@ -426,11 +476,11 @@ class DataController:
             ind_name = rec.indicator.name.strip()
             reg_key = _norm_regularity(rec.shipping.route.regularity)
             rt_key = _norm_route_type(rec.shipping.route.type)
-            month_key = rec.month.name if hasattr(rec.month, "name") else str(rec.month)
+            period = _record_period(rec)
 
-            months_seen.add(month_key)
+            periods_seen.add(period)
             if rec.value is not None:
-                data[(reg_key, ind_name)][month_key][rt_key] += rec.value
+                data[(reg_key, ind_name)][period][rt_key] += rec.value
 
         name_to_id = _name_to_indicator_id_from_records(records)
         code_to_indicator: Dict[str, Indicator] = {}
@@ -442,9 +492,7 @@ class DataController:
                 if n not in name_to_id:
                     name_to_id[n] = ind.id
 
-        months = [m for m in MONTHS_LIST if m in months_seen]
-        if not months:
-            months = [None]
+        periods = _sorted_periods(periods_seen) or [EMPTY_PERIOD]
 
         f = filters or {}
         rtm = f.get("route_types")
@@ -460,18 +508,18 @@ class DataController:
         groups = []
 
         col = len(headers)
-        for month_key in months:
+        for period in periods:
             first = col
+            pk = _period_col_key(period)
             for rt in route_types_to_show:
                 headers.append(ROUTE_TYPE_NAMES[rt])
-                keys.append(f"m_{month_key}_rt_{rt}")
+                keys.append(f"m_{pk}_rt_{rt}")
                 col += 1
             headers.append("Всего")
-            keys.append(f"m_{month_key}_total")
+            keys.append(f"m_{pk}_total")
             col += 1
             last = col - 1
-            month_label = MONTHS_RU.get(month_key, month_key or "")
-            groups.append((first, last, month_label))
+            groups.append((first, last, _period_label(period)))
 
         pivot_rows: List[Dict[str, Any]] = []
         for section_key in REGULARITY_ORDER:
@@ -498,15 +546,16 @@ class DataController:
                     "measure": (ind.measure or "").strip(),
                     "code": code,
                 }
-                for month_key in months:
+                for period in periods:
                     inner = data.get((section_key, ind_name))
-                    month_data = inner.get(month_key, {}) if inner is not None else {}
+                    period_data = inner.get(period, {}) if inner is not None else {}
+                    pk = _period_col_key(period)
                     for rt in route_types_to_show:
-                        val = month_data.get(rt, Decimal("0"))
-                        row[f"m_{month_key}_rt_{rt}"] = _dec_to_float(val)
+                        val = period_data.get(rt, Decimal("0"))
+                        row[f"m_{pk}_rt_{rt}"] = _dec_to_float(val)
                     total_keys = _route_type_keys_for_total_sum(route_types_to_show)
-                    total_row = sum(month_data.get(k, Decimal("0")) for k in total_keys)
-                    row[f"m_{month_key}_total"] = _dec_to_float(total_row)
+                    total_row = sum(period_data.get(k, Decimal("0")) for k in total_keys)
+                    row[f"m_{pk}_total"] = _dec_to_float(total_row)
                 pivot_rows.append(row)
 
         n_indicators = _count_ga12_data_rows(pivot_rows)
@@ -516,7 +565,7 @@ class DataController:
             "headers": headers,
             "keys": keys,
             "groups": groups,
-            "months": months,
+            "periods": periods,
             "n_indicators": n_indicators,
             "n_records": len(records),
         }
@@ -551,7 +600,7 @@ class DataController:
                     seen[al.id] = al.name.strip()
             airline_rows = sorted(seen.items(), key=lambda x: x[1])
 
-        # (регулярность, имя показателя) -> месяц -> airline_id -> route_type -> сумма
+        # (регулярность, имя показателя) -> период -> airline_id -> route_type -> сумма
         data = defaultdict(
             lambda: defaultdict(
                 lambda: defaultdict(
@@ -559,7 +608,7 @@ class DataController:
                 )
             )
         )
-        months_seen: set = set()
+        periods_seen: Set[tuple] = set()
 
         for rec in records:
             if not rec.indicator or not rec.shipping or not rec.shipping.route:
@@ -570,10 +619,10 @@ class DataController:
             ind_name = rec.indicator.name.strip()
             reg_key = _norm_regularity(rec.shipping.route.regularity)
             rt_key = _norm_route_type(rec.shipping.route.type)
-            month_key = rec.month.name if hasattr(rec.month, "name") else str(rec.month)
-            months_seen.add(month_key)
+            period = _record_period(rec)
+            periods_seen.add(period)
             if rec.value is not None:
-                data[(reg_key, ind_name)][month_key][aid][rt_key] += rec.value
+                data[(reg_key, ind_name)][period][aid][rt_key] += rec.value
 
         name_to_id = _name_to_indicator_id_from_records(records)
         code_to_indicator: Dict[str, Indicator] = {}
@@ -585,9 +634,7 @@ class DataController:
                 if n not in name_to_id:
                     name_to_id[n] = ind.id
 
-        months = [m for m in MONTHS_LIST if m in months_seen]
-        if not months:
-            months = [None]
+        periods = _sorted_periods(periods_seen) or [EMPTY_PERIOD]
 
         rtm = f.get("route_types")
         if rtm:
@@ -602,19 +649,19 @@ class DataController:
         groups = []
         col = len(headers)
 
-        for month_key in months:
+        for period in periods:
             first = col
+            pk = _period_col_key(period)
             for aid, aname in airline_rows:
                 for rt in route_types_to_show:
                     headers.append(f"{aname} — {ROUTE_TYPE_NAMES[rt]}")
-                    keys.append(f"m_{month_key}_aid_{aid}_rt_{rt}")
+                    keys.append(f"m_{pk}_aid_{aid}_rt_{rt}")
                     col += 1
                 headers.append(f"{aname} — Всего")
-                keys.append(f"m_{month_key}_aid_{aid}_total")
+                keys.append(f"m_{pk}_aid_{aid}_total")
                 col += 1
             last = col - 1
-            month_label = MONTHS_RU.get(month_key, month_key or "")
-            groups.append((first, last, month_label))
+            groups.append((first, last, _period_label(period)))
 
         pivot_rows: List[Dict[str, Any]] = []
         for section_key in REGULARITY_ORDER:
@@ -642,20 +689,21 @@ class DataController:
                     "code": code,
                 }
                 inner = data.get((section_key, ind_name))
-                for month_key in months:
-                    month_bucket = inner[month_key] if inner is not None else None
+                for period in periods:
+                    period_bucket = inner[period] if inner is not None else None
+                    pk = _period_col_key(period)
                     for aid, _ in airline_rows:
                         for rt in route_types_to_show:
                             val = Decimal("0")
-                            if month_bucket is not None:
-                                val = month_bucket[aid][rt]
-                            row[f"m_{month_key}_aid_{aid}_rt_{rt}"] = _dec_to_float(val)
+                            if period_bucket is not None:
+                                val = period_bucket[aid][rt]
+                            row[f"m_{pk}_aid_{aid}_rt_{rt}"] = _dec_to_float(val)
                         total_keys = _route_type_keys_for_total_sum(route_types_to_show)
                         total_row = Decimal("0")
-                        if month_bucket is not None:
+                        if period_bucket is not None:
                             for k in total_keys:
-                                total_row += month_bucket[aid][k]
-                        row[f"m_{month_key}_aid_{aid}_total"] = _dec_to_float(total_row)
+                                total_row += period_bucket[aid][k]
+                        row[f"m_{pk}_aid_{aid}_total"] = _dec_to_float(total_row)
                 pivot_rows.append(row)
 
         n_indicators = _count_ga12_data_rows(pivot_rows)
@@ -667,7 +715,7 @@ class DataController:
             "groups": groups,
             "stats": {
                 "indicators": n_indicators,
-                "months": len(months) if months[0] else 0,
+                "months": _period_count(periods),
                 "records": len(records),
                 "airlines": len(airline_rows),
                 "pivot_multi_airline_routes": True,
@@ -686,7 +734,6 @@ class DataController:
             airline_name = al.name.strip() if al else ""
 
         base = self._compute_airline_routes_pivot(records, filters)
-        months = base["months"]
         return {
             "rows": base["rows"],
             "headers": base["headers"],
@@ -695,7 +742,7 @@ class DataController:
             "stats": {
                 "airline_name": airline_name,
                 "indicators": base["n_indicators"],
-                "months": len(months) if months[0] else 0,
+                "months": _period_count(base["periods"]),
                 "records": base["n_records"],
             },
         }
@@ -712,7 +759,7 @@ class DataController:
             airline_name = al.name.strip() if al else ""
 
         data = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: Decimal("0"))))
-        months_seen: set = set()
+        periods_seen: Set[tuple] = set()
 
         for rec in records:
             if not rec.indicator or not rec.shipping or not rec.shipping.route:
@@ -720,15 +767,15 @@ class DataController:
             ind_name = rec.indicator.name.strip()
             reg_key = _norm_regularity(rec.shipping.route.regularity)
             rt_key = _norm_route_type(rec.shipping.route.type)
-            month_key = rec.month.name if hasattr(rec.month, "name") else str(rec.month)
-            months_seen.add(month_key)
+            period = _record_period(rec)
+            periods_seen.add(period)
             if rec.value is not None:
-                data[(reg_key, ind_name)][month_key][rt_key] += rec.value
+                data[(reg_key, ind_name)][period][rt_key] += rec.value
 
         agg: Dict[tuple, Dict[Any, Decimal]] = defaultdict(lambda: defaultdict(lambda: Decimal("0")))
         for (_reg_key, _ind_name), md in data.items():
-            for month_key, rt_dict in md.items():
-                agg[(_reg_key, _ind_name)][month_key] += sum(rt_dict.values())
+            for period, rt_dict in md.items():
+                agg[(_reg_key, _ind_name)][period] += sum(rt_dict.values())
 
         name_to_id = _name_to_indicator_id_from_records(records)
         code_to_indicator: Dict[str, Indicator] = {}
@@ -740,12 +787,21 @@ class DataController:
                 if n not in name_to_id:
                     name_to_id[n] = ind.id
 
-        months = [m for m in MONTHS_LIST if m in months_seen]
-        if not months:
-            months = [None]
+        periods = _sorted_periods(periods_seen) or [EMPTY_PERIOD]
 
-        headers = ["Показатель", "Ед. изм.", "Код ОКЕИ"] + [MONTHS_RU.get(m, m or "") for m in months] + ["Всего"]
-        keys = ["indicator", "measure", "code"] + [f"m_{m}" for m in months] + ["total"]
+        # «Всего» — сумма показанных колонок. Пока колонки схлопывались, эта сумма
+        # была единственным местом, где два года складывались осмысленно; теперь
+        # каждый период подписан отдельно, и итог читается однозначно.
+        headers = (
+            ["Показатель", "Ед. изм.", "Код ОКЕИ"]
+            + [_period_label(p) for p in periods]
+            + ["Всего"]
+        )
+        keys = (
+            ["indicator", "measure", "code"]
+            + [f"m_{_period_col_key(p)}" for p in periods]
+            + ["total"]
+        )
         groups: List[tuple] = []
 
         pivot_rows: List[Dict[str, Any]] = []
@@ -775,9 +831,9 @@ class DataController:
                 }
                 inner = agg.get((section_key, ind_name))
                 total = Decimal("0")
-                for m in months:
-                    val = inner.get(m, Decimal("0")) if inner is not None else Decimal("0")
-                    row[f"m_{m}"] = _dec_to_float(val)
+                for period in periods:
+                    val = inner.get(period, Decimal("0")) if inner is not None else Decimal("0")
+                    row[f"m_{_period_col_key(period)}"] = _dec_to_float(val)
                     total += val
                 row["total"] = _dec_to_float(total)
                 pivot_rows.append(row)
@@ -792,7 +848,7 @@ class DataController:
             "stats": {
                 "airline_name": airline_name,
                 "indicators": n_indicators,
-                "months": len(months) if months[0] else 0,
+                "months": _period_count(periods),
                 "records": len(records),
             },
         }
@@ -809,22 +865,22 @@ class DataController:
         )
         measure_nocode: Dict[str, str] = {}
         airports = set()
-        months_seen = set()
+        periods_seen: Set[tuple] = set()
 
         for rec in records:
             if not rec.indicator or not rec.airport:
                 continue
             ap_name = rec.airport.name.strip()
-            month_key = rec.month.name if hasattr(rec.month, 'name') else str(rec.month)
+            period = _record_period(rec)
             airports.add(ap_name)
-            months_seen.add(month_key)
+            periods_seen.add(period)
             code = (rec.indicator.code or "").strip()
             if rec.value is not None:
                 if code:
-                    ind_by_code[code][month_key][ap_name] += rec.value
+                    ind_by_code[code][period][ap_name] += rec.value
                 else:
                     ind_name = rec.indicator.name.strip()
-                    ind_by_name_nocode[ind_name][month_key][ap_name] += rec.value
+                    ind_by_name_nocode[ind_name][period][ap_name] += rec.value
                     measure_nocode[ind_name] = (rec.indicator.measure or "").strip()
 
         name_to_id = _name_to_indicator_id_from_records(records)
@@ -837,26 +893,24 @@ class DataController:
                     name_to_id[n] = ind.id
         
         airports = sorted(airports)
-        months = [m for m in MONTHS_LIST if m in months_seen]
-        if not months:
-            months = [None]
-        
+        periods = _sorted_periods(periods_seen) or [EMPTY_PERIOD]
+
         headers = ["Показатель", "Ед. изм.", "Код ОКЕИ"]
         keys = ["indicator", "measure", "code"]
         groups = []
         col = len(headers)
-        for month_key in months:
+        for period in periods:
             first = col
+            pk = _period_col_key(period)
             headers.append("Свод")
-            keys.append(f"m_{month_key}_total")
+            keys.append(f"m_{pk}_total")
             col += 1
             for i, ap in enumerate(airports):
                 headers.append(ap)
-                keys.append(f"m_{month_key}_a_{i}")
+                keys.append(f"m_{pk}_a_{i}")
                 col += 1
             last = col - 1
-            month_label = MONTHS_RU.get(month_key, month_key or "")
-            groups.append((first, last, month_label))
+            groups.append((first, last, _period_label(period)))
         
         pivot_rows = []
         known_codes = set(GA12_CODE_ORDER_FLAT)
@@ -870,14 +924,15 @@ class DataController:
                 "measure": (ind.measure or "").strip(),
                 "code": code,
             }
-            for month_key in months:
-                month_data = ind_by_code.get(code, {}).get(month_key, {})
+            for period in periods:
+                period_data = ind_by_code.get(code, {}).get(period, {})
+                pk = _period_col_key(period)
                 total = Decimal('0')
                 for ap in airports:
-                    total += month_data.get(ap, Decimal('0'))
-                row[f"m_{month_key}_total"] = _dec_to_float(total)
+                    total += period_data.get(ap, Decimal('0'))
+                row[f"m_{pk}_total"] = _dec_to_float(total)
                 for i, ap in enumerate(airports):
-                    row[f"m_{month_key}_a_{i}"] = _dec_to_float(month_data.get(ap, Decimal('0')))
+                    row[f"m_{pk}_a_{i}"] = _dec_to_float(period_data.get(ap, Decimal('0')))
             return row
 
         def data_row_for_name_nocode_ap(ind_name: str) -> Dict[str, Any]:
@@ -886,14 +941,15 @@ class DataController:
                 "measure": measure_nocode.get(ind_name, ""),
                 "code": "",
             }
-            for month_key in months:
-                month_data = ind_by_name_nocode.get(ind_name, {}).get(month_key, {})
+            for period in periods:
+                period_data = ind_by_name_nocode.get(ind_name, {}).get(period, {})
+                pk = _period_col_key(period)
                 total = Decimal('0')
                 for ap in airports:
-                    total += month_data.get(ap, Decimal('0'))
-                row[f"m_{month_key}_total"] = _dec_to_float(total)
+                    total += period_data.get(ap, Decimal('0'))
+                row[f"m_{pk}_total"] = _dec_to_float(total)
                 for i, ap in enumerate(airports):
-                    row[f"m_{month_key}_a_{i}"] = _dec_to_float(month_data.get(ap, Decimal('0')))
+                    row[f"m_{pk}_a_{i}"] = _dec_to_float(period_data.get(ap, Decimal('0')))
             return row
 
         for section_key in REGULARITY_ORDER:
