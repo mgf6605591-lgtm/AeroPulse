@@ -61,6 +61,12 @@ local_settings.py
 db.sqlite3
 db.sqlite3-journal
 
+# Рабочая БД приложения (SQLite в режиме WAL) — у каждой установки своя,
+# в репозиторий не попадает: бинарник не сливается и тянет за собой учётные данные.
+*.db
+*.db-wal
+*.db-shm
+
 # Flask stuff:
 instance/
 .webassets-cache
