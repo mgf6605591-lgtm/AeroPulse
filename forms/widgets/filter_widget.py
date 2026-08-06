@@ -151,6 +151,15 @@ class FilterWidget(QGroupBox):
         self._load_entities()
         self._load_indicators()
 
+    def reload_reference_lists(self):
+        """Перечитать списки предприятий и показателей после правки справочников.
+
+        Период намеренно не трогается: пользователь его уже выставил, и сброс на
+        умолчание после возврата из другого окна выглядел бы потерей работы (ср. BUG-25).
+        """
+        self._load_entities()
+        self._load_indicators()
+
     def get_airline_filter_ids(self):
         """None — все АК; иначе список id."""
         if self.current_mode != MODE_AIRLINE:

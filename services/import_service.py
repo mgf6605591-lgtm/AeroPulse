@@ -129,14 +129,28 @@ class ImportService:
     
     @classmethod
     def get_airlines(cls) -> list:
-        """Возвращает список всех авиакомпаний с ID"""
+        """Действующие авиакомпании с ID.
+
+        Выведенное из работы предприятие не предлагается для импорта: новые отчёты
+        в него загружать незачем, а старые остаются доступны в сводах (SCH-10).
+        """
         with get_session() as session:
-            airlines = session.query(Airline).order_by(Airline.name).all()
+            airlines = (
+                session.query(Airline)
+                .filter(Airline.is_active.is_(True))
+                .order_by(Airline.name)
+                .all()
+            )
             return [(a.id, a.name.strip()) for a in airlines]
-    
+
     @classmethod
     def get_airports(cls) -> list:
-        """Возвращает список всех аэропортов с ID"""
+        """Действующие аэропорты с ID."""
         with get_session() as session:
-            airports = session.query(Airport).order_by(Airport.name).all()
+            airports = (
+                session.query(Airport)
+                .filter(Airport.is_active.is_(True))
+                .order_by(Airport.name)
+                .all()
+            )
             return [(a.id, a.name.strip()) for a in airports]

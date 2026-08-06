@@ -21,8 +21,16 @@ class FilterController:
 
         try:
             with get_session() as session:
+                # Только действующие предприятия. Выведенное из работы уходит из
+                # списков выбора, но его отчётность остаётся в базе и в отчётах за
+                # прошлые периоды — в этом и смысл флага вместо удаления (SCH-10).
                 if mode == MODE_AIRLINE:
-                    rows = session.query(Airline).order_by(Airline.name).all()
+                    rows = (
+                        session.query(Airline)
+                        .filter(Airline.is_active.is_(True))
+                        .order_by(Airline.name)
+                        .all()
+                    )
                     seen: set = set()
                     result: list = [(None, "Все")]
                     for e in rows:
@@ -32,7 +40,12 @@ class FilterController:
                         seen.add(eid)
                         result.append((eid, e.name.strip()))
                 else:
-                    rows = session.query(Airport).order_by(Airport.name).all()
+                    rows = (
+                        session.query(Airport)
+                        .filter(Airport.is_active.is_(True))
+                        .order_by(Airport.name)
+                        .all()
+                    )
                     seen = set()
                     result = [(None, "Все")]
                     for e in rows:
