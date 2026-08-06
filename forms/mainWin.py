@@ -26,6 +26,7 @@ from forms.widgets.filter_widget import FilterWidget
 from forms.widgets.airport_filter_widget import AirportFilterWidget
 from forms.widgets.data_table_widget import DataTableWidget
 from forms.widgets.import_dialog import ImportDialog
+from forms.widgets.period_dialog import PeriodDialog
 from utils.constants import MONTHS_RU, MODE_AIRLINE, MODE_AIRPORT
 
 
@@ -172,6 +173,14 @@ class MainWindow(QMainWindow):
                     month=None,
                     year=None,
                 )
+
+                # Период не прочитался — спрашиваем его у пользователя вместо
+                # прежней молчаливой подстановки «январь 2025» (DATA-2).
+                if result.get("period_required"):
+                    result = self._import_with_asked_period(
+                        file_path, entity_type, entity_id, result
+                    )
+
                 base_name = result.get("source_file") or Path(file_path).name
                 pm = result.get("period_month")
                 py = result.get("period_year")
@@ -180,8 +189,10 @@ class MainWindow(QMainWindow):
 
                 if result.get("success"):
                     any_success = True
+                    sheet = result.get("sheet_name")
+                    where = f", лист «{sheet}»" if sheet else ""
                     report_lines.append(
-                        f"OK — {base_name} ({period}): {result.get('message', '')}"
+                        f"OK — {base_name} ({period}{where}): {result.get('message', '')}"
                     )
                 else:
                     report_lines.append(
@@ -203,6 +214,37 @@ class MainWindow(QMainWindow):
             QApplication.restoreOverrideCursor()
             QMessageBox.critical(self, "Ошибка импорта", str(e))
             traceback.print_exc()
+
+    def _import_with_asked_period(self, file_path, entity_type, entity_id, result: dict) -> dict:
+        """Спрашивает период у пользователя и повторяет импорт файла.
+
+        Курсор ожидания снимается на время диалога: он выставлен на весь пакет,
+        а здесь управление возвращается человеку.
+        """
+        QApplication.restoreOverrideCursor()
+        dialog = PeriodDialog(
+            Path(file_path).name,
+            month=result.get("period_month"),
+            year=result.get("period_year"),
+            parent=self,
+        )
+        accepted = dialog.exec() == PeriodDialog.DialogCode.Accepted
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+
+        if not accepted:
+            return {
+                "success": False,
+                "message": "Файл пропущен: отчётный период не указан.",
+                "source_file": Path(file_path).name,
+            }
+
+        return ImportService.import_file(
+            file_path,
+            entity_type=entity_type,
+            entity_id=entity_id,
+            month=dialog.get_month(),
+            year=dialog.get_year(),
+        )
 
     def refresh_entities(self, entity_type: str, combo_box):
         """Обновляет список предприятий в диалоге"""
