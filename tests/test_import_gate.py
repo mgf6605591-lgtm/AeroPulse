@@ -23,18 +23,8 @@ from parsers.f15_xlsx_parser import F15XLSXParser
 from parsers.xlsx_parser import XLSXParser
 from services.import_service import ImportService
 from services.parse_service import ParseService
-from tests.support import MigratedDbCase
+from tests.support import MigratedDbCase, make_ga12_workbook
 
-# Подписи и позиции взяты из раскладок парсеров. Номера строк openpyxl — 1-based,
-# в iloc парсера они на единицу меньше.
-GA12_ROWS = (
-    (11, "Самолето-километры"),
-    (12, "Отправлений воздушных судов"),
-    (13, "Налет часов"),
-    (14, "Перевезено пассажиров"),
-    (17, "Выполненный пассажирооборот"),
-    (19, "Выполненный тоннокилометраж"),
-)
 F15_ROWS = (
     (1, "Международные регулярные"),
     (2, "Международные нерегулярные"),
@@ -42,28 +32,6 @@ F15_ROWS = (
     (6, "Внутренние нерегулярные"),
     (9, "Все прочие операции"),
 )
-
-
-def make_ga12_workbook(path, *, titul_period="за январь 2025 год", with_values=True,
-                       sheet_title="ГА12", labels=GA12_ROWS):
-    """Книга формы 12-ГА. titul_period=None — лист «Титул» не создаётся вовсе."""
-    wb = Workbook()
-    ws = wb.active
-    ws.title = sheet_title
-    # Ячейка A1 задаёт начало используемого диапазона: без неё pandas начал бы
-    # читать с первой заполненной строки и все индексы разъехались бы.
-    ws.cell(row=1, column=1, value="Форма 12-ГА")
-    for excel_row, label in labels:
-        ws.cell(row=excel_row, column=1, value=label)
-        if with_values:
-            for col in range(5, 10):  # графы E…I: международные, внутренние, местные, субсидируемые
-                ws.cell(row=excel_row, column=col, value=10)
-    if titul_period is not None:
-        titul = wb.create_sheet("Титул")
-        titul.cell(row=1, column=1, value="Титульный лист")
-        titul.cell(row=13, column=4, value=titul_period)  # D13
-    wb.save(path)
-    return path
 
 
 def make_f15_workbook(path, *, period="за февраль 2026 г.", with_values=True):
@@ -196,6 +164,16 @@ class FormDetectionTest(WorkbookCase):
         wb.save(path)
         with self.assertRaises(ValueError):
             ParseService.parse_file(path, entity_type="airline", entity_id=1)
+
+    def test_uppercase_extension_is_accepted(self):
+        """Расширение сравнивается без учёта регистра (BUG-6).
+
+        Windows регистр в именах не различает, и отчёт, присланный как «.XLSX»,
+        открывался у пользователя, но не открывался программой.
+        """
+        path = make_ga12_workbook(self.path("h.XLSX"))
+        result = ParseService.parse_file(path, entity_type="airline", entity_id=1)
+        self.assertEqual(result["data_type"], "airline")
 
     def test_titul_sheet_is_not_parsed_as_report(self):
         """Прежний откат на первый лист книги разбирал «Титул» как отчёт (DATA-4)."""
@@ -331,6 +309,45 @@ class RealGa12FileTest(unittest.TestCase):
         self.assertEqual(result["sheet_name"], "ГА12")
         self.assertEqual((result["month"], result["year"]), ("January", 2025))
         self.assertTrue(result["indicators"])
+
+    def values(self) -> dict:
+        result = XLSXParser.parse_file(REAL_GA12)
+        return {(i["indicator_code"], i["route_type"]): i["value"] for i in result["indicators"]}
+
+    def test_values_match_the_blank(self):
+        """Сверка с бланком построчно: графа 6 «Внутренние — всего».
+
+        Проверка есть именно потому, что прежний тест ограничивался «показатели
+        прочитались». Строки листа адресовались индексами и были смещены на
+        единицу: 452 самолёто-километра лежали в базе как «Отправлений воздушных
+        судов», 223 отправления — как «Налет часов», 642 часа налёта — как
+        «Перевезено пассажиров». Ни одного признака ошибки при этом не было.
+        """
+        values = self.values()
+        self.assertEqual(452, values[("965", "local")])
+        self.assertEqual(223, values[("642", "local")])
+        self.assertEqual(642, values[("356", "local")])
+        self.assertEqual(27666, values[("792", "local")])
+        self.assertEqual(140.62, values[("168", "local")])
+        self.assertEqual(24.21, values[("168п", "local")])
+
+    def test_ton_detail_sums_up_to_its_parent(self):
+        """а) пассажирский + б) грузовой + в) почтовый = «Выполненный тоннокилометраж».
+
+        Равенство держится на бланке само по себе, поэтому служит проверкой того,
+        что все четыре строки опознаны верно, а не только прочитаны.
+        """
+        values = self.values()
+        for route_type in ("local", "interregional"):
+            with self.subTest(route_type=route_type):
+                detail = sum(values[(code, route_type)] for code in ("450пас", "450гр", "450пч"))
+                self.assertAlmostEqual(values[("450", route_type)], detail, places=2)
+
+    def test_non_commercial_section_has_only_the_blank_row(self):
+        """В бланке некоммерческих полётов одна строка — «Налет часов»."""
+        result = XLSXParser.parse_file(REAL_GA12)
+        codes = {i["indicator_code"] for i in result["indicators"] if i["regularity"] == "non_commercial"}
+        self.assertEqual({"356нк"}, codes)
 
 
 @unittest.skipUnless(os.path.exists(REAL_F15), f"нет файла {REAL_F15}")

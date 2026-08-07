@@ -1,4 +1,5 @@
-"""Общая обвязка тестов: временная БД, состояния схемы, засев справочников.
+"""Общая обвязка тестов: временная БД, состояния схемы, засев справочников,
+синтетические книги бланков.
 
 Каждый тест работает в собственном временном файле. Рабочая БД проекта
 (db/database.db) не открывается ни на чтение, ни на запись.
@@ -10,6 +11,7 @@ import unittest
 
 from alembic import command
 from alembic.script import ScriptDirectory
+from openpyxl import Workbook
 from sqlalchemy import create_engine, event, text
 
 from db.database import _sqlite_pragmas
@@ -102,6 +104,96 @@ def scalar(engine, sql: str):
     with engine.connect() as conn:
         return conn.execute(text(sql)).scalar()
 
+
+# Строки бланка 12-ГА: (№ строки из графы 2, название, код по ОКЕИ).
+# Взяты из самого бланка, а не из раскладки парсера: фикстура, собранная по коду
+# парсера, подтверждает только саму себя — так и держался незамеченным сдвиг строк
+# на единицу, при котором каждое значение уходило в базу под соседним кодом.
+GA12_ROWS = (
+    (1, "Самолето-километры", "965"),
+    (2, "Отправлений воздушных судов", "642"),
+    (3, "Налет часов", "356"),
+    (4, "Перевезено пассажиров", "792"),
+    (7, "Выполненный пассажирооборот", "423"),
+    (9, "Выполненный тоннокилометраж", "450"),
+)
+
+# Детализация тоннокилометража: в бланке эти строки идут под «в том числе:»
+# и своего номера не имеют.
+GA12_DETAIL_ROWS = (
+    ("а) пассажирский", "450"),
+    ("б) грузовой (включая срочный груз)", "450"),
+    ("в) почтовый", "450"),
+)
+
+
+def ga12_cell_value(number: int, col: int) -> int:
+    """Значение графы: своё число в каждой графе, чтобы перепутанные графы были видны."""
+    return number * 10 + (col - 4)
+
+
+def ga12_total_value(number: int) -> int:
+    """Графа 9 бланка — «ИТОГО гр.4+гр.5+гр.6», производная от трёх первых."""
+    return sum(ga12_cell_value(number, col) for col in (5, 6, 7))
+
+
+def make_ga12_workbook(path, *, titul_period="за январь 2025 год", with_values=True,
+                       sheet_title="ГА12", labels=GA12_ROWS, details=GA12_DETAIL_ROWS):
+    """Книга формы 12-ГА. titul_period=None — лист «Титул» не создаётся вовсе.
+
+    Разметка повторяет бланк: графа 1 — название, графа 2 — № строки, графа 4 —
+    код по ОКЕИ, графы 5…9 — данные по видам сообщения. Отдельно воспроизведена
+    служебная строка нумерации граф: в её графе 2 стоит число 2, по которому она
+    неотличима от строки 02 бланка.
+    """
+    wb = Workbook()
+    ws = wb.active
+    ws.title = sheet_title
+    # Ячейка A1 задаёт начало используемого диапазона: без неё pandas начал бы
+    # читать с первой заполненной строки и все индексы разъехались бы.
+    ws.cell(row=1, column=1, value="Форма 12-ГА")
+
+    for col in range(1, 4):
+        ws.cell(row=10, column=col, value=str(col))
+    for col in range(5, 11):
+        ws.cell(row=10, column=col, value=str(col - 1))
+
+    excel_row = 11
+    if labels:
+        ws.cell(row=excel_row, column=1, value="РЕГУЛЯРНЫЕ КОММЕРЧЕСКИЕ ПЕРЕВОЗКИ")
+        excel_row += 1
+
+    def write_values(row: int, number: int) -> None:
+        if not with_values:
+            return
+        for col in range(5, 10):  # графы 4…8 бланка: международные, внутренние, местные, субсидируемые
+            ws.cell(row=row, column=col, value=ga12_cell_value(number, col))
+        # Графа 9 «ИТОГО гр.4+гр.5+гр.6» — в бланке она есть, в базу не идёт.
+        ws.cell(row=row, column=10, value=ga12_total_value(number))
+
+    for number, label, okei in labels:
+        ws.cell(row=excel_row, column=1, value=label)
+        ws.cell(row=excel_row, column=2, value=number)
+        ws.cell(row=excel_row, column=4, value=okei)
+        write_values(excel_row, number)
+        excel_row += 1
+
+        # Детализация идёт сразу под строкой 9 «Выполненный тоннокилометраж».
+        if number == 9 and details:
+            ws.cell(row=excel_row, column=1, value="    в том числе:")
+            excel_row += 1
+            for offset, (detail_label, detail_okei) in enumerate(details, start=1):
+                ws.cell(row=excel_row, column=1, value=f"            {detail_label}")
+                ws.cell(row=excel_row, column=4, value=detail_okei)
+                write_values(excel_row, 90 + offset)
+                excel_row += 1
+
+    if titul_period is not None:
+        titul = wb.create_sheet("Титул")
+        titul.cell(row=1, column=1, value="Титульный лист")
+        titul.cell(row=13, column=4, value=titul_period)  # D13
+    wb.save(path)
+    return path
 
 class TempDbCase(unittest.TestCase):
     """Тест с пустой временной БД (файл ещё не создан)."""

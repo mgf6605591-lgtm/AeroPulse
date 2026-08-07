@@ -127,5 +127,41 @@ class ReimportTest(ImportCase):
             self.assertEqual(2, session.query(AirlineIndicators).count())
 
 
+class IndicatorCodeTest(ImportCase):
+    """Код показателя при создании справочной записи (BUG-1)."""
+
+    def nameless(self, code: str, value: str) -> dict:
+        row = indicator_row(code, "", value)
+        row["indicator_name"] = ""
+        return row
+
+    def test_code_survives_an_empty_name(self):
+        """`code or name[:10] if name else 'UNK'` Python читает как
+        `(code or name[:10]) if name else 'UNK'` — при пустом имени код
+        отбрасывался и подставлялось 'UNK'.
+        """
+        self.do_import([self.nameless("965", "100")])
+
+        self.assertIn("965", self.indicators_by_code())
+
+    def test_two_nameless_rows_do_not_collide(self):
+        """Второй 'UNK' ронял импорт файла: код показателя уникален."""
+        result = self.do_import([self.nameless("965", "100"), self.nameless("642", "200")])
+
+        self.assertTrue(result["success"], result["message"])
+        by_code = self.indicators_by_code()
+        self.assertIn("965", by_code)
+        self.assertIn("642", by_code)
+
+    def test_name_is_used_when_there_is_no_code(self):
+        row = indicator_row("", "Показатель без кода", "1")
+        row["indicator_code"] = ""
+
+        self.do_import([row])
+
+        # Код без кода — первые 10 символов названия.
+        self.assertIn("Показатель", self.indicators_by_code())
+
+
 if __name__ == "__main__":
     unittest.main()
