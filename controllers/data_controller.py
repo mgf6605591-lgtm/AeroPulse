@@ -974,11 +974,18 @@ class DataController:
     def load_detail_data(self, mode: int, filters: Dict) -> Dict[str, Any]:
         """Загружает данные для подробной таблицы"""
         if mode == 1:  # MODE_AIRLINE
-            headers = ["ID", "Авиакомпания", "Код а/к", "Показатель", "Месяц", "Год", "Значение", "Ед. изм.", "Тип маршрута"]
+            # Регулярность выводится рядом с типом маршрута: вдвоём они и образуют
+            # рейс. Без неё две записи с одним показателем, месяцем и типом
+            # маршрута выглядели в таблице одинаково — а удаляют именно отсюда,
+            # и отменить удаление нечем (FUNC-11).
+            headers = [
+                "ID", "Авиакомпания", "Код а/к", "Показатель", "Месяц", "Год",
+                "Значение", "Ед. изм.", "Тип маршрута", "Регулярность",
+            ]
             attrs = [
                 'id', 'shipping.airline.name', 'shipping.airline.code',
                 'indicator.name', 'month', 'year', 'value',
-                'indicator.measure', 'shipping.route.type'
+                'indicator.measure', 'shipping.route.type', 'shipping.route.regularity'
             ]
             records = AirlineIndicatorService.filter_indicators(filters) if filters else AirlineIndicatorService.get_all_indicators()
         else:
