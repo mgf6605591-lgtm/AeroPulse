@@ -8,14 +8,20 @@
 import os
 import tempfile
 import unittest
+from decimal import Decimal
+from unittest.mock import patch
 
 from alembic import command
 from alembic.script import ScriptDirectory
 from openpyxl import Workbook
 from sqlalchemy import create_engine, event, text
+from sqlalchemy.orm import sessionmaker
 
+from controllers.data_controller import DataController
 from db.database import _sqlite_pragmas
 from db.migrator import _config, upgrade_to_head
+from db.models.entities import Airline, Indicator
+from db.models.enums import Months, RouteType, ShippingRegularity
 
 
 def db_url(engine) -> str:
@@ -212,3 +218,104 @@ class MigratedDbCase(TempDbCase):
     def setUp(self) -> None:
         super().setUp()
         upgrade_to_head(self.engine)
+
+# Заглушки записей отчётности для построителей свода. Построителям нужны только
+# атрибуты показателя, рейса и периода; поднимать ради этого полный граф связей
+# ORM значило бы проверять SQLAlchemy вместо логики свода.
+
+
+class FakeAirline:
+    def __init__(self, aid: int, name: str):
+        self.id = aid
+        self.name = name
+
+
+class FakeRoute:
+    def __init__(self, route_type: str, regularity: str):
+        self.type = RouteType[route_type]
+        self.regularity = ShippingRegularity[regularity]
+
+
+class FakeShipping:
+    def __init__(self, airline: FakeAirline, route: FakeRoute):
+        self.airline = airline
+        self.route = route
+
+
+class FakeIndicator:
+    def __init__(self, code: str, name: str, measure: str, iid: int = 1):
+        self.id = iid
+        self.code = code
+        self.name = name
+        self.measure = measure
+
+
+class FakeRecord:
+    """Запись отчётности в том виде, в каком её видят построители свода."""
+
+    def __init__(self, code, name, month, year, value, *, measure="тыс.сам.-км",
+                 airline=("Тестовая АК", 1), route_type="trunk", regularity="regular"):
+        self.indicator = FakeIndicator(code, name, measure)
+        self.shipping = FakeShipping(FakeAirline(airline[1], airline[0]),
+                                     FakeRoute(route_type, regularity))
+        self.month = Months[month]
+        self.year = year
+        self.value = Decimal(str(value))
+        self.airport = None
+
+
+class PivotCase(MigratedDbCase):
+    """Построители свода на подменённой выборке и настоящем справочнике показателей."""
+
+    def setUp(self):
+        super().setUp()
+        self.Session = sessionmaker(bind=self.engine, expire_on_commit=False)
+        with self.Session() as session:
+            session.add(Indicator(name="Самолето-километры", code="965", measure="тыс.сам.-км"))
+            session.add(Indicator(name="Налет часов", code="356", measure="час."))
+            # Свод по одной АК читает её название из БД по id.
+            session.add(Airline(id=1, code="AAA", name="Тестовая АК"))
+            session.commit()
+
+        session_patch = patch("controllers.data_controller.get_session", self.Session)
+        session_patch.start()
+        self.addCleanup(session_patch.stop)
+
+        self.controller = DataController()
+
+    def build_all_airlines(self, records):
+        with patch(
+            "controllers.data_controller.AirlineIndicatorService.filter_indicators",
+            return_value=records,
+        ):
+            return self.controller._load_pivot_all_airlines({"any": "filter"})
+
+    def build_per_airline_summary(self, records):
+        with patch(
+            "controllers.data_controller.AirlineIndicatorService.filter_indicators",
+            return_value=records,
+        ):
+            return self.controller._load_pivot_per_airline_summary({}, airline_id=1)
+
+    def build_per_airline_by_routes(self, records, filters=None):
+        with patch(
+            "controllers.data_controller.AirlineIndicatorService.filter_indicators",
+            return_value=records,
+        ):
+            return self.controller._load_pivot_per_airline(filters or {}, airline_id=1)
+
+    def build_multi_airline_by_routes(self, records, filters=None):
+        # Фильтр непустой намеренно: без него построитель берёт выборку не через
+        # filter_indicators, а через get_all_indicators, то есть мимо подмены.
+        with patch(
+            "controllers.data_controller.AirlineIndicatorService.filter_indicators",
+            return_value=records,
+        ):
+            return self.controller._load_pivot_multi_airline_by_routes(filters or {"any": "filter"})
+
+    @staticmethod
+    def row_for_code(result, code):
+        for row in result["rows"]:
+            if row.get("code") == code:
+                return row
+        raise AssertionError(f"в своде нет строки с кодом {code}")
