@@ -18,6 +18,7 @@ from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker
 
 from controllers.data_controller import DataController
+from controllers.reference_cache import reference_cache
 from db.database import _sqlite_pragmas
 from db.migrator import _config, upgrade_to_head
 from db.models.entities import Airline, Indicator
@@ -210,6 +211,10 @@ class TempDbCase(unittest.TestCase):
         self.db_path = os.path.join(tmp.name, "test.db")
         self.engine = make_engine(self.db_path)
         self.addCleanup(self.engine.dispose)
+        # Кеш справочников общий на приложение, а база у каждого теста своя:
+        # без сброса список из чужой базы дожил бы до следующего теста.
+        reference_cache.clear()
+        self.addCleanup(reference_cache.clear)
 
 
 class MigratedDbCase(TempDbCase):
