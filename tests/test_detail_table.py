@@ -9,10 +9,12 @@
 
 import os
 import unittest
+from decimal import Decimal
 from unittest.mock import patch
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from db.models.enums import Months, RouteType, ShippingRegularity
 from utils.constants import MODE_AIRLINE, MODE_AIRPORT
 
 try:
@@ -37,29 +39,38 @@ class DetailColumnsTest(unittest.TestCase):
 
     def setUp(self):
         from controllers.data_controller import DataController
-        from tests.support import FakeRecord
 
         self.controller = DataController()
-        # Две записи, отличающиеся только регулярностью, — тот самый случай.
-        self.records = [
-            FakeRecord("965", "Самолето-километры", "January", 2025, 100, regularity="regular"),
-            FakeRecord("965н", "Самолето-километры", "January", 2025, 7, regularity="irregular"),
-        ]
 
     def load(self, mode=MODE_AIRLINE):
         service = (
-            "controllers.data_controller.AirlineIndicatorService.filter_indicators"
+            "controllers.data_controller.AirlineIndicatorService.detail_rows"
             if mode == MODE_AIRLINE
-            else "controllers.data_controller.AirportIndicatorService.filter_indicators"
+            else "controllers.data_controller.AirportIndicatorService.detail_rows"
         )
-        with patch(service, return_value=self.records):
+        with patch(service, return_value=self.rows()):
             return self.controller.load_detail_data(mode, {"any": "filter"})
+
+    def rows(self):
+        """Снимки строк — то, что теперь отдаёт служба (BUG-14)."""
+        from services.detail_rows import DetailRow
+
+        return [
+            DetailRow(id=1, entity_name="Тестовая АК", entity_code="AAA",
+                      indicator="Самолето-километры", measure="тыс.сам.-км",
+                      month=Months.January, year=2025, value=Decimal("100"),
+                      route_type=RouteType.trunk, regularity=ShippingRegularity.regular),
+            DetailRow(id=2, entity_name="Тестовая АК", entity_code="AAA",
+                      indicator="Самолето-километры", measure="тыс.сам.-км",
+                      month=Months.January, year=2025, value=Decimal("7"),
+                      route_type=RouteType.trunk, regularity=ShippingRegularity.irregular),
+        ]
 
     def test_regularity_column_is_present(self):
         data = self.load()
 
         self.assertIn("Регулярность", data["headers"])
-        self.assertIn("shipping.route.regularity", data["attrs"])
+        self.assertIn("regularity", data["attrs"])
 
     def test_headers_and_attrs_stay_aligned(self):
         """Колонка и её атрибут сопоставляются по номеру — длины обязаны совпадать."""
@@ -91,15 +102,20 @@ class DetailRowsAreDistinguishableTest(unittest.TestCase):
     def setUp(self):
         from controllers.data_controller import DataController
         from db.models.sqlalchemy_table_model import SQLAlchemyTableModel
-        from tests.support import FakeRecord
 
-        records = [
-            FakeRecord("965", "Самолето-километры", "January", 2025, 100, regularity="regular"),
-            FakeRecord("965н", "Самолето-километры", "January", 2025, 7, regularity="irregular"),
+        from services.detail_rows import DetailRow
+
+        rows = [
+            DetailRow(id=1, entity_name="АК", entity_code="AAA", indicator="Самолето-километры",
+                      measure="тыс.сам.-км", month=Months.January, year=2025, value=Decimal("100"),
+                      route_type=RouteType.trunk, regularity=ShippingRegularity.regular),
+            DetailRow(id=2, entity_name="АК", entity_code="AAA", indicator="Самолето-километры",
+                      measure="тыс.сам.-км", month=Months.January, year=2025, value=Decimal("7"),
+                      route_type=RouteType.trunk, regularity=ShippingRegularity.irregular),
         ]
         with patch(
-            "controllers.data_controller.AirlineIndicatorService.filter_indicators",
-            return_value=records,
+            "controllers.data_controller.AirlineIndicatorService.detail_rows",
+            return_value=rows,
         ):
             data = DataController().load_detail_data(MODE_AIRLINE, {"any": "filter"})
 

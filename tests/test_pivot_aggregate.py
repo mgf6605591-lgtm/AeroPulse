@@ -33,13 +33,17 @@ class PivotDoesNotLoadFactsTest(PivotCase):
         ]
 
     def build_without_facts(self, build):
-        """Выборка фактов подменяется взрывающейся: любой её вызов провалит тест."""
+        """Выборка фактов подменяется взрывающейся: любой её вызов провалит тест.
+
+        Служба отдаёт факты только подробной таблице (`detail_rows`), и свод не
+        должен трогать этот путь вовсе.
+        """
         from unittest.mock import patch
 
         from tests.support import aggregate_rows
 
         with patch(
-            "controllers.data_controller.AirlineIndicatorService.filter_indicators",
+            "controllers.data_controller.AirlineIndicatorService.detail_rows",
             side_effect=AssertionError("свод читает факты вместо агрегата"),
         ), patch(
             "controllers.data_controller.AirlineIndicatorService.aggregate",

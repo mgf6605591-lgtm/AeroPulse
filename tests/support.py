@@ -332,32 +332,30 @@ class PivotCase(MigratedDbCase):
         self.controller = DataController()
 
     def with_records(self, records):
-        """Подменяет оба источника: и выборку фактов, и агрегат."""
+        """Подменяет источник свода: службы отдают агрегат, а не сами факты."""
         return (
-            patch("controllers.data_controller.AirlineIndicatorService.filter_indicators",
-                  return_value=records),
             patch("controllers.data_controller.AirlineIndicatorService.aggregate",
                   return_value=aggregate_rows(records)),
         )
 
     def build_all_airlines(self, records):
-        facts, agg = self.with_records(records)
-        with facts, agg:
+        (agg,) = self.with_records(records)
+        with agg:
             return self.controller._load_pivot_all_airlines({"any": "filter"})
 
     def build_per_airline_summary(self, records):
-        facts, agg = self.with_records(records)
-        with facts, agg:
+        (agg,) = self.with_records(records)
+        with agg:
             return self.controller._load_pivot_per_airline_summary({}, airline_id=1)
 
     def build_per_airline_by_routes(self, records, filters=None):
-        facts, agg = self.with_records(records)
-        with facts, agg:
+        (agg,) = self.with_records(records)
+        with agg:
             return self.controller._load_pivot_per_airline(filters or {}, airline_id=1)
 
     def build_multi_airline_by_routes(self, records, filters=None):
-        facts, agg = self.with_records(records)
-        with facts, agg:
+        (agg,) = self.with_records(records)
+        with agg:
             return self.controller._load_pivot_multi_airline_by_routes(filters or {"any": "filter"})
 
     @staticmethod
