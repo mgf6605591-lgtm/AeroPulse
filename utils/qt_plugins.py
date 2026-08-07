@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 import site
+import sys
 from pathlib import Path
 
 
@@ -16,6 +17,12 @@ def ensure_qt_platform_plugins() -> None:
     for key in ("QT_PLUGIN_PATH", "QT_QPA_PLATFORM_PLUGIN_PATH"):
         if os.environ.get(key) == "":
             del os.environ[key]
+
+    # Ищется qwindows.dll — плагин, который существует только под Windows.
+    # На остальных системах поиск заведомо ничего не находил, но доходил до
+    # рекурсивного обхода site-packages, и так при каждом запуске (PERF-6).
+    if sys.platform != "win32":
+        return
 
     def _try_plugins_dir(plugins_dir: Path) -> bool:
         plat = plugins_dir / "platforms"
