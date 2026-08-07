@@ -6,54 +6,31 @@
 Колонки XML code → тип маршрута в БД:
   4, 5 → международные (trunk), в БД сохраняется сумма;
   6    → внутренние всего (local);
-  7    → местные (interregional);
-  8    → субсидируемые (subsidir);
-  9    → итого (производное), в импорт не включается.
+  7    → из них местные (interregional);
+  8    → из них субсидируемые (subsidir);
+  9    → ИТОГО гр.4+гр.5+гр.6 (производное), в импорт не включается.
 
-Строки XML code → показатель и регулярность — как в типовой форме (см. f12.xml <rows>).
+Строки XML code → показатель, единица измерения и раздел бланка — из общей
+таблицы `utils/ga12_layout.py`, той же, по которой разбирается XLSX.
 """
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
 from decimal import Decimal
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 from parsers.base_parser import BaseParser
+from utils.ga12_layout import GA12_ROW_BY_XML_ROW
 
 _MONTH_ENUM = [
     "January", "February", "March", "April", "May", "June",
     "July", "August", "September", "October", "November", "December",
 ]
 
-# XML row code → (код ОКЕИ, название, ед. изм., regularity: regular | irregular | non_commercial)
-_XML_ROW_MAP: Dict[int, Tuple[str, str, str, str]] = {
-    # Регулярные коммерческие (секция после заголовка строки 1)
-    2: ("965", "Самолето-километры", "тыс.сам.-км", "regular"),
-    3: ("642", "Отправлений воздушных судов", "ед.", "regular"),
-    4: ("356", "Налет часов", "час.", "regular"),
-    5: ("792", "Перевезено пассажиров", "чел.", "regular"),
-    6: ("168", "Перевезено грузов", "тонн", "regular"),
-    7: ("168п", "Перевезено почты", "тонн", "regular"),
-    8: ("423", "Выполненный пассажирооборот", "тыс.пасс.-км", "regular"),
-    9: ("423п", "Предельный пассажирооборот", "тыс.пасс.-км", "regular"),
-    10: ("450", "Выполненный тоннокилометраж", "тыс. ткм", "regular"),
-    12: ("450пас", "      а) пассажирский", "тыс. ткм", "regular"),
-    13: ("450гр", "      б) грузовой (вкл. срочный груз)", "тыс. ткм", "regular"),
-    14: ("450пч", "      в) почтовый", "тыс. ткм", "regular"),
-    15: ("450п", "Предельный тоннокилометраж", "тыс. ткм", "regular"),
-    # Нерегулярные коммерческие
-    17: ("965н", "Самолето-километры", "тыс.сам.-км", "irregular"),
-    18: ("642н", "Отправлений воздушных судов", "ед.", "irregular"),
-    19: ("356н", "Налет часов", "час.", "irregular"),
-    20: ("792н", "Перевезено пассажиров", "чел.", "irregular"),
-    21: ("168н", "Перевезено грузов и почты", "тонн", "irregular"),
-    22: ("423н", "Выполненный пассажирооборот", "тыс.пасс.-км", "irregular"),
-    23: ("423нп", "Предельный пассажирооборот", "тыс.пасс.-км", "irregular"),
-    24: ("450н", "Выполненный тоннокилометраж", "тыс. ткм", "irregular"),
-    25: ("450нп", "Предельный тоннокилометраж", "тыс. ткм", "irregular"),
-    # Некоммерческие полёты (в короткой схеме может быть только часть строк)
-    27: ("356нк", "Налет часов", "час.", "non_commercial"),
-}
+# Коды строк, названия, единицы измерения и раздел — из общей таблицы бланка
+# (utils/ga12_layout.py). Своя копия карты строк здесь и раскладка по индексам
+# листа в XLSX-парсере разошлись, и один отчёт в двух форматах давал в базе
+# разный набор строк (BUG-3).
 
 
 class XMLParser(BaseParser):
@@ -160,10 +137,10 @@ class XMLParser(BaseParser):
                 rcode = int(code_attr)
             except ValueError:
                 continue
-            if rcode not in _XML_ROW_MAP:
+            blank_row = GA12_ROW_BY_XML_ROW.get(rcode)
+            if blank_row is None:
                 continue
 
-            okei, name, measure, regularity = _XML_ROW_MAP[rcode]
             cols: Dict[str, str] = {}
             for col in row.findall("col"):
                 c = col.get("code")
@@ -199,11 +176,11 @@ class XMLParser(BaseParser):
                     continue
                 out.append(
                     {
-                        "indicator_code": okei,
-                        "indicator_name": name.strip(),
-                        "measure": measure.strip(),
+                        "indicator_code": blank_row.code,
+                        "indicator_name": blank_row.name,
+                        "measure": blank_row.measure,
                         "route_type": route_type,
-                        "regularity": regularity,
+                        "regularity": blank_row.section,
                         "value": value,
                     }
                 )

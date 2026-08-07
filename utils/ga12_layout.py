@@ -1,0 +1,121 @@
+# utils/ga12_layout.py
+"""Строки бланка 12-ГА — одна таблица для обоих парсеров, импортёра и свода.
+
+Раскладка формы жила в трёх местах: жёсткие номера строк листа в XLSX-парсере,
+карта кодов строк в XML-парсере и плоский список кодов в `utils/constants.py`,
+из которого разделы нарезались срезами по индексам. Списки разошлись, и один и
+тот же отчёт в двух форматах давал в базе разное содержимое (BUG-3, ARCH-12).
+
+Источник — бланк 12-ГА: графа 1 (название показателя), графа 2 (№ строки),
+графа 3 (единица измерения), графа 4 (код по ОКЕИ); коды строк XML-выгрузки —
+из метаформы f12.xml. Бланк нумерует строки с данными 1…20 сквозь все три
+раздела, поэтому номер строки — единственный ключ, по которому лист опознаётся
+без счёта строк листа: вставленная в шапку строка сдвигает индексы, но не номера.
+
+Код показателя в приложении — это код ОКЕИ с суффиксом. Сам ОКЕИ показатель не
+определяет: в бланке 168 стоит и у грузов, и у почты, а 450 — у всех пяти строк
+тоннокилометража. Суффиксы: `п` — предельный, `н` — нерегулярные, `нк` —
+некоммерческие, `пас`/`гр`/`пч` — детализация тоннокилометража.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Dict, Optional, Tuple
+
+# Разделы бланка. Значения совпадают с именами членов ShippingRegularity:
+# так подписан раздел в форме, и такой же признак хранится у перевозки.
+SECTION_REGULAR = "regular"
+SECTION_IRREGULAR = "irregular"
+SECTION_NON_COMMERCIAL = "non_commercial"
+
+# Заголовки разделов в бланке — по ним раздел виден человеку; парсер их не ищет,
+# ему хватает номера строки. Оставлены как описание формы.
+GA12_SECTION_HEADINGS = {
+    SECTION_REGULAR: "РЕГУЛЯРНЫЕ КОММЕРЧЕСКИЕ ПЕРЕВОЗКИ",
+    SECTION_IRREGULAR: "НЕРЕГУЛЯРНЫЕ КОММЕРЧЕСКИЕ ПЕРЕВОЗКИ",
+    SECTION_NON_COMMERCIAL: "НЕКОММЕРЧЕСКИЕ ПОЛЕТЫ",
+}
+
+
+@dataclass(frozen=True)
+class Ga12Row:
+    """Строка бланка 12-ГА.
+
+    `blank_number` — № из графы 2; у строк детализации его нет, они опознаются
+    маркером «а)», «б)», «в)» под родительской строкой. `xml_row` — код строки
+    в XML-выгрузке. `okei` — код графы 4, служит перекрёстной проверкой: если
+    номер строки и ОКЕИ в файле расходятся, разбирается не тот бланк.
+    """
+
+    code: str
+    name: str
+    measure: str
+    section: str
+    okei: str
+    xml_row: int
+    blank_number: Optional[int] = None
+    detail_of: Optional[str] = None
+    detail_marker: Optional[str] = None
+
+
+# Бланк целиком: 10 нумерованных строк регулярных перевозок плюс три строки
+# детализации тоннокилометража, 9 нерегулярных, 1 некоммерческая. Больше в форме
+# строк нет — ни в бланке, ни в метаформе XML.
+GA12_ROWS: Tuple[Ga12Row, ...] = (
+    # Регулярные коммерческие перевозки
+    Ga12Row("965", "Самолето-километры", "тыс.сам.-км", SECTION_REGULAR, "965", 2, 1),
+    Ga12Row("642", "Отправлений воздушных судов", "ед.", SECTION_REGULAR, "642", 3, 2),
+    Ga12Row("356", "Налет часов", "час.", SECTION_REGULAR, "356", 4, 3),
+    Ga12Row("792", "Перевезено пассажиров", "чел.", SECTION_REGULAR, "792", 5, 4),
+    Ga12Row("168", "Перевезено грузов", "тонн", SECTION_REGULAR, "168", 6, 5),
+    Ga12Row("168п", "Перевезено почты", "тонн", SECTION_REGULAR, "168", 7, 6),
+    Ga12Row("423", "Выполненный пассажирооборот", "тыс.пасс.-км", SECTION_REGULAR, "423", 8, 7),
+    Ga12Row("423п", "Предельный пассажирооборот", "тыс.пасс.-км", SECTION_REGULAR, "423", 9, 8),
+    Ga12Row("450", "Выполненный тоннокилометраж", "тыс. ткм", SECTION_REGULAR, "450", 10, 9),
+    Ga12Row("450пас", "а) пассажирский", "тыс. ткм", SECTION_REGULAR, "450", 12,
+            detail_of="450", detail_marker="а)"),
+    Ga12Row("450гр", "б) грузовой (вкл. срочный груз)", "тыс. ткм", SECTION_REGULAR, "450", 13,
+            detail_of="450", detail_marker="б)"),
+    Ga12Row("450пч", "в) почтовый", "тыс. ткм", SECTION_REGULAR, "450", 14,
+            detail_of="450", detail_marker="в)"),
+    Ga12Row("450п", "Предельный тоннокилометраж", "тыс. ткм", SECTION_REGULAR, "450", 15, 10),
+    # Нерегулярные коммерческие перевозки
+    Ga12Row("965н", "Самолето-километры", "тыс.сам.-км", SECTION_IRREGULAR, "965", 17, 11),
+    Ga12Row("642н", "Отправлений воздушных судов", "ед.", SECTION_IRREGULAR, "642", 18, 12),
+    Ga12Row("356н", "Налет часов", "час.", SECTION_IRREGULAR, "356", 19, 13),
+    Ga12Row("792н", "Перевезено пассажиров", "чел.", SECTION_IRREGULAR, "792", 20, 14),
+    Ga12Row("168н", "Перевезено грузов и почты", "тонн", SECTION_IRREGULAR, "168", 21, 15),
+    Ga12Row("423н", "Выполненный пассажирооборот", "тыс.пасс.-км", SECTION_IRREGULAR, "423", 22, 16),
+    Ga12Row("423нп", "Предельный пассажирооборот", "тыс.пасс.-км", SECTION_IRREGULAR, "423", 23, 17),
+    Ga12Row("450н", "Выполненный тоннокилометраж", "тыс. ткм", SECTION_IRREGULAR, "450", 24, 18),
+    Ga12Row("450нп", "Предельный тоннокилометраж", "тыс. ткм", SECTION_IRREGULAR, "450", 25, 19),
+    # Некоммерческие полёты — в бланке и в метаформе это одна строка
+    Ga12Row("356нк", "Налет часов", "час.", SECTION_NON_COMMERCIAL, "356", 27, 20),
+)
+
+GA12_SECTION_ORDER: Tuple[str, ...] = (SECTION_REGULAR, SECTION_IRREGULAR, SECTION_NON_COMMERCIAL)
+
+GA12_ROW_BY_CODE: Dict[str, Ga12Row] = {row.code: row for row in GA12_ROWS}
+
+# Ключи разбора: № строки бланка для XLSX, код строки для XML.
+GA12_ROW_BY_BLANK_NUMBER: Dict[int, Ga12Row] = {
+    row.blank_number: row for row in GA12_ROWS if row.blank_number is not None
+}
+GA12_ROW_BY_XML_ROW: Dict[int, Ga12Row] = {row.xml_row: row for row in GA12_ROWS}
+
+# Строки детализации тоннокилометража: в бланке у них нет номера, опознаются
+# маркером под родительской строкой.
+GA12_DETAIL_ROW_BY_MARKER: Dict[str, Ga12Row] = {
+    row.detail_marker: row for row in GA12_ROWS if row.detail_marker
+}
+
+GA12_CODES_FLAT: Tuple[str, ...] = tuple(row.code for row in GA12_ROWS)
+
+GA12_CODES_BY_SECTION_KEY: Dict[str, Tuple[str, ...]] = {
+    section: tuple(row.code for row in GA12_ROWS if row.section == section)
+    for section in GA12_SECTION_ORDER
+}
+
+GA12_DETAIL_PARENT_BY_CODE: Dict[str, str] = {
+    row.code: row.detail_of for row in GA12_ROWS if row.detail_of
+}
