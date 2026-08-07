@@ -102,17 +102,21 @@ class FilterWidget(QGroupBox):
         self._load_route_types()
         self._set_default_period()
 
-    def _load_entities(self):
+    def _load_entities(self, keep_selection: bool = False):
         entities = self.filter_controller.load_entities(self.current_mode)
         items = [(eid, label) for eid, label in entities if eid is not None]
+        # set_items сам оставляет из выбора только то, что есть в новом списке,
+        # поэтому сохранять выбор отдельно не требуется — достаточно не сбрасывать.
         self.entity_btn.set_items(items)
-        self.entity_btn.clear_selection()
+        if not keep_selection:
+            self.entity_btn.clear_selection()
 
-    def _load_indicators(self):
+    def _load_indicators(self, keep_selection: bool = False):
         indicators = self.filter_controller.load_indicators()
         items = [(iid, label) for iid, label in indicators if iid is not None]
         self.indicator_btn.set_items(items)
-        self.indicator_btn.clear_selection()
+        if not keep_selection:
+            self.indicator_btn.clear_selection()
 
     def _load_route_types(self):
         self.route_btn.set_items([(rt, rt.value) for rt in RouteType])
@@ -152,13 +156,14 @@ class FilterWidget(QGroupBox):
         self._load_indicators()
 
     def reload_reference_lists(self):
-        """Перечитать списки предприятий и показателей после правки справочников.
+        """Перечитать списки предприятий и показателей: после импорта и правки справочников.
 
-        Период намеренно не трогается: пользователь его уже выставил, и сброс на
-        умолчание после возврата из другого окна выглядел бы потерей работы (ср. BUG-25).
+        Период и уже сделанный выбор намеренно не трогаются: пользователь их
+        выставил, и сброс на умолчание после импорта выглядел бы потерей работы
+        (BUG-25). Пропавшие из справочника позиции уходят из выбора сами.
         """
-        self._load_entities()
-        self._load_indicators()
+        self._load_entities(keep_selection=True)
+        self._load_indicators(keep_selection=True)
 
     def get_airline_filter_ids(self):
         """None — все АК; иначе список id."""

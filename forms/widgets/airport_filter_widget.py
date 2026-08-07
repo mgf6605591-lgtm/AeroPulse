@@ -78,6 +78,13 @@ class AirportFilterWidget(QGroupBox):
         main.addLayout(row_period)
 
     def _load_lists(self):
+        """Первое заполнение: справочники и период по умолчанию."""
+        self._load_airports()
+        self._load_indicators()
+        self._set_default_period()
+
+    def _load_airports(self, keep_selection: bool = False):
+        current = self.get_airport_id() if keep_selection else None
         entities = self.filter_controller.load_entities(MODE_AIRPORT)
         self.airport_combo.blockSignals(True)
         try:
@@ -86,14 +93,23 @@ class AirportFilterWidget(QGroupBox):
             for eid, label in entities:
                 if eid is not None:
                     self.airport_combo.addItem(label, int(eid))
+            if current is not None:
+                for i in range(self.airport_combo.count()):
+                    if self.airport_combo.itemData(i) == current:
+                        self.airport_combo.setCurrentIndex(i)
+                        break
         finally:
             self.airport_combo.blockSignals(False)
 
+    def _load_indicators(self, keep_selection: bool = False):
         indicators = self.filter_controller.load_indicators()
         items = [(iid, label) for iid, label in indicators if iid is not None]
+        # set_items оставляет из выбора только то, что есть в новом списке.
         self.indicator_btn.set_items(items)
-        self.indicator_btn.clear_selection()
+        if not keep_selection:
+            self.indicator_btn.clear_selection()
 
+    def _set_default_period(self):
         # Умолчание — последний год с данными, а не весь их диапазон: раздельные
         # колонки по годам (DATA-1) иначе дали бы 24+ колонки при открытии.
         _, max_year, _, _ = self.filter_controller.get_period_range()
@@ -147,13 +163,14 @@ class AirportFilterWidget(QGroupBox):
         self.to_month.blockSignals(block)
         self.to_year.blockSignals(block)
 
-    def refresh_airport_list(self):
-        """После импорта — обновить список аэропортов, сохранив выбор по id."""
-        cur = self.get_airport_id()
-        self.filter_controller.clear_cache()
-        self._load_lists()
-        if cur is not None:
-            for i in range(self.airport_combo.count()):
-                if self.airport_combo.itemData(i) == cur:
-                    self.airport_combo.setCurrentIndex(i)
-                    break
+    def reload_reference_lists(self):
+        """Перечитать справочники, сохранив выбор аэропорта, показателей и период.
+
+        Прежний метод вызывал `_load_lists()` целиком: он честно возвращал
+        выбранный аэропорт, но молча сбрасывал период на умолчание и снимал
+        фильтр показателей, хотя обновить требовалось только справочники (BUG-25).
+        Сброс кеша здесь не делается — он общий и сбрасывается один раз тем, кто
+        менял данные (BUG-7).
+        """
+        self._load_airports(keep_selection=True)
+        self._load_indicators(keep_selection=True)
