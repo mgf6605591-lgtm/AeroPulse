@@ -269,6 +269,49 @@ class FakeRecord:
         self.airport = None
 
 
+class FakeAggregateRow:
+    """Строка агрегата — то, что отдаёт база после GROUP BY."""
+
+    def __init__(self, regularity, route_type, airline_id, airline_name,
+                 indicator_id, indicator_code, indicator_name, measure,
+                 year, month, total, records):
+        self.regularity = regularity
+        self.route_type = route_type
+        self.airline_id = airline_id
+        self.airline_name = airline_name
+        self.indicator_id = indicator_id
+        self.indicator_code = indicator_code
+        self.indicator_name = indicator_name
+        self.measure = measure
+        self.year = year
+        self.month = month
+        self.total = total
+        self.records = records
+
+
+def aggregate_rows(records):
+    """Свернуть заглушки фактов так, как их сгруппировала бы база.
+
+    Тесты по-прежнему описывают отдельные записи отчётности — это понятнее, — а
+    построители свода получают агрегат, потому что после PERF-2 читают именно его.
+    """
+    buckets = {}
+    for rec in records:
+        route = rec.shipping.route
+        airline = rec.shipping.airline
+        indicator = rec.indicator
+        key = (
+            route.regularity, route.type, airline.id, airline.name,
+            indicator.id, indicator.code, indicator.name, indicator.measure,
+            rec.year, rec.month,
+        )
+        bucket = buckets.setdefault(key, [0.0, 0])
+        bucket[0] += float(rec.value)
+        bucket[1] += 1
+    return [FakeAggregateRow(*key, total=total, records=count)
+            for key, (total, count) in buckets.items()]
+
+
 class PivotCase(MigratedDbCase):
     """Построители свода на подменённой выборке и настоящем справочнике показателей."""
 
@@ -288,34 +331,33 @@ class PivotCase(MigratedDbCase):
 
         self.controller = DataController()
 
+    def with_records(self, records):
+        """Подменяет оба источника: и выборку фактов, и агрегат."""
+        return (
+            patch("controllers.data_controller.AirlineIndicatorService.filter_indicators",
+                  return_value=records),
+            patch("controllers.data_controller.AirlineIndicatorService.aggregate",
+                  return_value=aggregate_rows(records)),
+        )
+
     def build_all_airlines(self, records):
-        with patch(
-            "controllers.data_controller.AirlineIndicatorService.filter_indicators",
-            return_value=records,
-        ):
+        facts, agg = self.with_records(records)
+        with facts, agg:
             return self.controller._load_pivot_all_airlines({"any": "filter"})
 
     def build_per_airline_summary(self, records):
-        with patch(
-            "controllers.data_controller.AirlineIndicatorService.filter_indicators",
-            return_value=records,
-        ):
+        facts, agg = self.with_records(records)
+        with facts, agg:
             return self.controller._load_pivot_per_airline_summary({}, airline_id=1)
 
     def build_per_airline_by_routes(self, records, filters=None):
-        with patch(
-            "controllers.data_controller.AirlineIndicatorService.filter_indicators",
-            return_value=records,
-        ):
+        facts, agg = self.with_records(records)
+        with facts, agg:
             return self.controller._load_pivot_per_airline(filters or {}, airline_id=1)
 
     def build_multi_airline_by_routes(self, records, filters=None):
-        # Фильтр непустой намеренно: без него построитель берёт выборку не через
-        # filter_indicators, а через get_all_indicators, то есть мимо подмены.
-        with patch(
-            "controllers.data_controller.AirlineIndicatorService.filter_indicators",
-            return_value=records,
-        ):
+        facts, agg = self.with_records(records)
+        with facts, agg:
             return self.controller._load_pivot_multi_airline_by_routes(filters or {"any": "filter"})
 
     @staticmethod
