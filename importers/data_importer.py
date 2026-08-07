@@ -8,6 +8,7 @@ from db.models.entities import (
     AirlineIndicators, AirportIndicators
 )
 from db.models.enums import ShippingRegularity, RouteType, Months
+from services import journal_service as journal
 from utils.constants import GA12_DETAIL_TON_PARENT
 import time
 
@@ -207,6 +208,7 @@ class DataImporter:
             routes = cls._route_index(session)
             shippings = cls._shipping_index(session, airline.id)
             existing_rows = cls._existing_airline_rows(session, airline.id, month_enum, year)
+            touched: set = set()
 
             for indicator_data in data.get('indicators', []):
                 code = indicator_data.get('indicator_code') or indicator_data.get('code')
@@ -244,6 +246,7 @@ class DataImporter:
                 value = _exact_decimal(value)
 
                 key = (indicator.id, shipping.id)
+                touched.add(key)
                 existing = existing_rows.get(key)
                 if existing is not None:
                     # Тот же ключ второй раз в одном файле обновляет запись, а не
@@ -263,12 +266,46 @@ class DataImporter:
                     existing_rows[key] = airline_ind
                     total_imported += 1
 
+            total_removed = cls._drop_vanished_rows(session, existing_rows, touched)
+
+            journal.record_safely(
+                session,
+                kind=journal.KIND_IMPORT,
+                source_file=data.get('source_file'),
+                entity_type='airline',
+                entity_id=airline.id,
+                entity_name=airline.name.strip(),
+                month=month_enum,
+                year=year,
+                imported=total_imported,
+                updated=total_updated,
+                removed=total_removed,
+            )
+
             session.commit()
 
-            return cls._import_result(total_imported, total_updated)
+            return cls._import_result(total_imported, total_updated, total_removed)
 
         except Exception as e:
             return cls._failure(session, e, "авиакомпании")
+
+    @staticmethod
+    def _drop_vanished_rows(session, existing_rows: dict, touched: set) -> int:
+        """Убирает строки периода, которых нет в новом файле (DATA-5).
+
+        Импорт работает как upsert, поэтому исправленный отчёт, где ошибочная
+        строка удалена, оставлял прежнее значение в базе: свод показывал смесь
+        двух версий отчёта, и понять, какая из них в базе, было нечем.
+
+        Отчёт за период считается полным: что не пришло — того за этот период у
+        предприятия нет. Удаление идёт в той же транзакции, что и запись, и
+        попадает в журнал вместе с ней; перед необратимой частью операции окно
+        снимает копию базы (FUNC-6).
+        """
+        vanished = [row for key, row in existing_rows.items() if key not in touched]
+        for row in vanished:
+            session.delete(row)
+        return len(vanished)
 
     @staticmethod
     def _as_enum(enum_cls, raw, default):
@@ -382,6 +419,7 @@ class DataImporter:
 
             # Строки периода читаются одним запросом, а не по одному на показатель.
             existing_rows = cls._existing_airport_rows(session, airport.id, month_enum, year)
+            touched: set = set()
 
             for indicator_data in data.get('indicators', []):
                 code = indicator_data.get('indicator_code') or indicator_data.get('code')
@@ -397,6 +435,7 @@ class DataImporter:
                 
                 value = _exact_decimal(value)
 
+                touched.add(indicator.id)
                 existing = existing_rows.get(indicator.id)
                 if existing is not None:
                     existing.value = value
@@ -413,9 +452,25 @@ class DataImporter:
                     existing_rows[indicator.id] = airport_ind
                     total_imported += 1
 
+            total_removed = cls._drop_vanished_rows(session, existing_rows, touched)
+
+            journal.record_safely(
+                session,
+                kind=journal.KIND_IMPORT,
+                source_file=data.get('source_file'),
+                entity_type='airport',
+                entity_id=airport.id,
+                entity_name=airport.name.strip(),
+                month=month_enum,
+                year=year,
+                imported=total_imported,
+                updated=total_updated,
+                removed=total_removed,
+            )
+
             session.commit()
 
-            return cls._import_result(total_imported, total_updated)
+            return cls._import_result(total_imported, total_updated, total_removed)
 
         except Exception as e:
             return cls._failure(session, e, "аэропорта")
@@ -447,7 +502,7 @@ class DataImporter:
         return month_enum, int(year), None
 
     @staticmethod
-    def _import_result(total_imported: int, total_updated: int) -> dict:
+    def _import_result(total_imported: int, total_updated: int, total_removed: int = 0) -> dict:
         """Итог импорта. Ноль записей — отказ, а не успех.
 
         Разбор, не нашедший ни одного показателя, возвращал success=True с
@@ -461,10 +516,19 @@ class DataImporter:
                 'message': 'Ни одного показателя не прочитано — в базу не записано ничего.',
                 'imported': 0,
                 'updated': 0,
+                'removed': 0,
             }
+        message = f'Импорт завершен. Добавлено: {total_imported}, Обновлено: {total_updated}'
+        if total_removed:
+            # Про удаление сообщается прямо: отчёт заменил период целиком, и
+            # пользователь должен видеть это, а не обнаружить потом в своде.
+            message += (
+                f'. Удалено строк, которых нет в новом отчёте: {total_removed}'
+            )
         return {
             'success': True,
-            'message': f'Импорт завершен. Добавлено: {total_imported}, Обновлено: {total_updated}',
+            'message': message,
             'imported': total_imported,
             'updated': total_updated,
+            'removed': total_removed,
         }

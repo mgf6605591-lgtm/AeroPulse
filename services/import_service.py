@@ -116,6 +116,10 @@ class ImportService:
                 'period_year': data.get('year'),
             }
 
+        # Имя файла кладётся в разобранные данные, а не только в ответ: импортёр
+        # записывает его в журнал вместе со счётчиками (FUNC-5).
+        data['source_file'] = os.path.basename(file_path)
+
         # Импорт данных (предприятие уже существует в БД, не создаем новое)
         with get_session() as session:
             result = DataImporter.import_data(session, data)
