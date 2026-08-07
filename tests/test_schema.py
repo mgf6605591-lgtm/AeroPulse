@@ -11,6 +11,10 @@ from sqlalchemy.exc import IntegrityError
 
 from tests.support import MigratedDbCase, scalar, seed_reference_data
 
+# Месяц хранится числом 1…12 (PERF-1): в сыром SQL пишем номер, а не имя.
+JANUARY = 1
+FEBRUARY = 2
+
 AIRPORT_ROW = (
     "INSERT INTO airportInd (indicator_id, airport_id, month, year, value) "
     "VALUES (:indicator_id, 1, :month, 2025, 1)"
@@ -35,7 +39,7 @@ class ForeignKeyTest(MigratedDbCase):
 
     def test_report_row_with_unknown_indicator_rejected(self):
         with self.assertRaises(IntegrityError):
-            self.execute(AIRPORT_ROW, indicator_id=999, month="January")
+            self.execute(AIRPORT_ROW, indicator_id=999, month=JANUARY)
 
     def test_locality_with_airports_not_deletable(self):
         """Правка справочника населённых пунктов не должна стирать отчётность."""
@@ -43,7 +47,7 @@ class ForeignKeyTest(MigratedDbCase):
             self.execute("DELETE FROM airport_localities WHERE id = 1")
 
     def test_indicator_with_reports_not_deletable(self):
-        self.execute(AIRPORT_ROW, indicator_id=1, month="January")
+        self.execute(AIRPORT_ROW, indicator_id=1, month=JANUARY)
         with self.assertRaises(IntegrityError):
             self.execute("DELETE FROM indicators WHERE id = 1")
 
@@ -53,14 +57,14 @@ class ForeignKeyTest(MigratedDbCase):
         Прежде здесь стоял каскад, и одна строка справочника забирала с собой
         отчёты за все периоды. Вместо удаления такую запись помечают неактивной.
         """
-        self.execute(AIRPORT_ROW, indicator_id=1, month="January")
+        self.execute(AIRPORT_ROW, indicator_id=1, month=JANUARY)
         with self.assertRaises(IntegrityError):
             self.execute("DELETE FROM airports WHERE id = 1")
         self.assertEqual(1, scalar(self.engine, "SELECT count(*) FROM airportInd"))
 
     def test_airline_with_shipping_not_deletable(self):
         """Запрет стоит на рейсах: рейс создаётся импортом, значит данные есть."""
-        self.execute(AIRLINE_ROW, month="January")
+        self.execute(AIRLINE_ROW, month=JANUARY)
         with self.assertRaises(IntegrityError):
             self.execute("DELETE FROM airlines WHERE id = 1")
         self.assertEqual(1, scalar(self.engine, "SELECT count(*) FROM airlineInd"))
@@ -90,13 +94,13 @@ class UniqueKeyTest(MigratedDbCase):
 
     def test_same_report_row_twice_rejected(self):
         """Один показатель на рейс за месяц — иначе свод удвоит суммы."""
-        self.execute(AIRLINE_ROW, month="January")
+        self.execute(AIRLINE_ROW, month=JANUARY)
         with self.assertRaises(IntegrityError):
-            self.execute(AIRLINE_ROW, month="January")
+            self.execute(AIRLINE_ROW, month=JANUARY)
 
     def test_same_indicator_in_other_month_allowed(self):
-        self.execute(AIRLINE_ROW, month="January")
-        self.execute(AIRLINE_ROW, month="February")
+        self.execute(AIRLINE_ROW, month=JANUARY)
+        self.execute(AIRLINE_ROW, month=FEBRUARY)
         self.assertEqual(2, scalar(self.engine, "SELECT count(*) FROM airlineInd"))
 
     def test_duplicate_shipping_rejected(self):
