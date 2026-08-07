@@ -61,8 +61,14 @@ class DataTableWidget(QWidget):
         self.grouped_header.setStretchLastSection(True)
         layout.addWidget(self.data_table)
         
-        # Shortcut для Delete
+        # Shortcut для Delete — только при фокусе внутри своей таблицы.
+        # Контекст по умолчанию (WindowShortcut) означал бы, что в окне
+        # зарегистрированы два одинаковых шортката (вкладки а/к и аэропортов) —
+        # Qt считает такую пару неоднозначной и не вызывает ни один обработчик
+        # (BUG-21), — а до того Delete срабатывал бы из полей фильтров,
+        # где его нажимают, чтобы стереть символ (BUG-22).
         self.delete_shortcut = QShortcut(QKeySequence("Delete"), self.data_table)
+        self.delete_shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
         self.delete_shortcut.activated.connect(self._on_delete_clicked)
         
         # Счетчик записей
