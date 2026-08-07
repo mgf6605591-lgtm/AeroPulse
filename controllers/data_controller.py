@@ -39,17 +39,6 @@ from utils.ga15_airport_layout import (
 GA15_CODE_ALIASES: Dict[str, str] = {}
 
 
-def _record_period(rec) -> tuple:
-    """Период записи — пара (год, месяц).
-
-    Ключом группировки служил один месяц без года, поэтому январь 2024 и январь 2025
-    складывались в одну колонку с подписью «Январь»: отчёт выглядел правдоподобно и
-    был неверен, причём при диапазоне по умолчанию — сразу при открытии (DATA-1).
-    """
-    month = rec.month.name if hasattr(rec.month, "name") else str(rec.month)
-    return (rec.year, month)
-
-
 def _sorted_periods(periods: Set[tuple]) -> List[tuple]:
     """Периоды в хронологическом порядке: сначала по году, затем по месяцу."""
     def order(period: tuple) -> tuple:
@@ -221,17 +210,6 @@ def _code_to_indicator_map(session) -> Dict[str, Indicator]:
     return {(r.code or "").strip(): r for r in session.query(Indicator).all() if r.code}
 
 
-def _name_to_indicator_id_from_records(records: List[Any]) -> Dict[str, int]:
-    out: Dict[str, int] = {}
-    for rec in records:
-        ind = getattr(rec, "indicator", None)
-        if ind:
-            n = ind.name.strip()
-            if n not in out:
-                out[n] = ind.id
-    return out
-
-
 def _indicator_row_sort_key(
     ind_name: str,
     name_to_id: Dict[str, int],
@@ -276,6 +254,84 @@ def _emit_vtom_before_row(
     if not pid:
         return False
     return id_to_code.get(pid) in GA12_TON_PARENT_CODES
+
+
+def _aggregate_period(row) -> tuple:
+    """Период строки агрегата — та же пара (год, месяц), что и у факта."""
+    month = row.month.name if hasattr(row.month, "name") else str(row.month)
+    return (row.year, month)
+
+
+def _aggregate_total(row) -> Decimal:
+    """Сумма группы обратно в Decimal: дальше свод считает и сворачивает точно."""
+    return Decimal(str(row.total or 0))
+
+
+def _fill_airline_columns(row, periods, airlines, by_period) -> None:
+    """Колонки свода по всем АК: «Свод» за период и по колонке на предприятие."""
+    for period in periods:
+        period_data = by_period.get(period, {})
+        pk = _period_col_key(period)
+        total = Decimal("0")
+        for airline in airlines:
+            total += period_data.get(airline, Decimal("0"))
+        row[f"m_{pk}_total"] = _dec_to_float(total)
+        for index, airline in enumerate(airlines):
+            row[f"m_{pk}_a_{index}"] = _dec_to_float(period_data.get(airline, Decimal("0")))
+
+
+def _emit_form_rows(keys, code_to_indicator, fill_cells, vtom_context=None) -> List[Dict[str, Any]]:
+    """Строки свода в порядке бланка: разделы, «в том числе», строки показателей.
+
+    Один обход на все своды. Прежде он был скопирован в каждый построитель, и
+    любая правка бланка требовала синхронного изменения в четырёх местах — так
+    DATA-1 и оказалась воспроизведена во всех четырёх копиях сразу (ARCH-4).
+
+    Отличаются своды только содержимым ячеек, поэтому его заполняет переданный
+    `fill_cells(row, section_key, code, ind_name)`; всё остальное — общее.
+
+    `vtom_context` — тройка (name_to_id, id_to_code, id_to_parent_id) для сводов,
+    которые ставят подзаголовок «в том числе» ещё и по связи parent_id, а не
+    только по списку кодов детализации.
+    """
+    rows: List[Dict[str, Any]] = []
+
+    for section_key in REGULARITY_ORDER:
+        codes_in_db = [
+            code for code in GA12_CODES_BY_SECTION.get(section_key, [])
+            if code in code_to_indicator
+        ]
+        if not codes_in_db:
+            continue
+
+        rows.append(_pivot_section_header_row(keys, GA12_SECTION_TITLE.get(section_key, section_key)))
+        vtom_done = False
+
+        for code in codes_in_db:
+            indicator = code_to_indicator[code]
+            ind_name = indicator.name.strip()
+
+            if code in GA12_DETAIL_TON_CODES and not vtom_done:
+                rows.append(_pivot_subheading_row(keys, GA12_SUBHEADING_VTOM))
+                vtom_done = True
+
+            if vtom_context is not None:
+                name_to_id, id_to_code, id_to_parent_id = vtom_context
+                if _emit_vtom_before_row(
+                    code, name_to_id, id_to_code, id_to_parent_id, ind_name, vtom_done
+                ):
+                    rows.append(_pivot_subheading_row(keys, GA12_SUBHEADING_VTOM))
+                    vtom_done = True
+
+            row: Dict[str, Any] = {
+                "indicator": ind_name,
+                "measure": (indicator.measure or "").strip(),
+                "code": code,
+            }
+            fill_cells(row, section_key, code, ind_name)
+            rows.append(row)
+
+    return rows
 
 
 def _norm_route_type(rt) -> str:
@@ -333,7 +389,7 @@ class DataController:
     
     def _load_pivot_all_airlines(self, filters: Dict) -> Dict[str, Any]:
         """Сводная таблица для всех авиакомпаний (полный бланк 12-ГА; без данных — нули)."""
-        records = AirlineIndicatorService.filter_indicators(filters) if filters else AirlineIndicatorService.get_all_indicators()
+        rows = AirlineIndicatorService.aggregate(filters)
 
         ind_by_code: Dict[str, Any] = defaultdict(
             lambda: defaultdict(lambda: defaultdict(lambda: Decimal('0')))
@@ -351,23 +407,22 @@ class DataController:
         raw_by_code: Dict[tuple, Decimal] = defaultdict(lambda: Decimal('0'))
         raw_by_name: Dict[tuple, Decimal] = defaultdict(lambda: Decimal('0'))
 
-        for rec in records:
-            if not rec.indicator or not rec.shipping or not rec.shipping.airline:
-                continue
-            airline_name = rec.shipping.airline.name.strip()
-            period = _record_period(rec)
+        n_records = 0
+        for row in rows:
+            airline_name = (row.airline_name or "").strip()
+            period = _aggregate_period(row)
             airlines.add(airline_name)
             periods_seen.add(period)
-            code = (rec.indicator.code or "").strip()
-            route = getattr(rec.shipping, "route", None)
-            rt_key = _norm_route_type(route.type) if route else ""
-            if rec.value is not None:
-                if code:
-                    raw_by_code[(code, period, airline_name, rt_key)] += rec.value
-                else:
-                    ind_name = rec.indicator.name.strip()
-                    raw_by_name[(ind_name, period, airline_name, rt_key)] += rec.value
-                    measure_nocode[ind_name] = (rec.indicator.measure or "").strip()
+            n_records += row.records
+            code = (row.indicator_code or "").strip()
+            rt_key = _norm_route_type(row.route_type)
+            total = _aggregate_total(row)
+            if code:
+                raw_by_code[(code, period, airline_name, rt_key)] += total
+            else:
+                ind_name = (row.indicator_name or "").strip()
+                raw_by_name[(ind_name, period, airline_name, rt_key)] += total
+                measure_nocode[ind_name] = (row.measure or "").strip()
 
         _collapse_route_types(raw_by_code, ind_by_code)
         _collapse_route_types(raw_by_name, ind_by_name_nocode)
@@ -402,8 +457,11 @@ class DataController:
 
         known_codes = set(GA12_CODE_ORDER_FLAT)
 
+        def fill_cells_for_code(row, section_key, code, ind_name):
+            _fill_airline_columns(row, periods, airlines, ind_by_code.get(code, {}))
+
         def data_row_for_code(code: str) -> Optional[Dict[str, Any]]:
-            """Строка свода только для кода из справочника indicators (название и ед. изм. из БД)."""
+            """Отдельная строка по коду — для раздела «прочие показатели»."""
             ind = code_to_row.get(code)
             if not ind:
                 return None
@@ -412,17 +470,7 @@ class DataController:
                 "measure": (ind.measure or "").strip(),
                 "code": code,
             }
-            for period in periods:
-                period_data = ind_by_code.get(code, {}).get(period, {})
-                pk = _period_col_key(period)
-                total = Decimal('0')
-                for airline in airlines:
-                    val = period_data.get(airline, Decimal('0'))
-                    total += val
-                row[f"m_{pk}_total"] = _dec_to_float(total)
-                for i, airline in enumerate(airlines):
-                    val = period_data.get(airline, Decimal('0'))
-                    row[f"m_{pk}_a_{i}"] = _dec_to_float(val)
+            _fill_airline_columns(row, periods, airlines, ind_by_code.get(code, {}))
             return row
 
         def data_row_for_name_nocode(ind_name: str) -> Dict[str, Any]:
@@ -431,35 +479,12 @@ class DataController:
                 "measure": measure_nocode.get(ind_name, ""),
                 "code": "",
             }
-            for period in periods:
-                period_data = ind_by_name_nocode.get(ind_name, {}).get(period, {})
-                pk = _period_col_key(period)
-                total = Decimal('0')
-                for airline in airlines:
-                    val = period_data.get(airline, Decimal('0'))
-                    total += val
-                row[f"m_{pk}_total"] = _dec_to_float(total)
-                for i, airline in enumerate(airlines):
-                    val = period_data.get(airline, Decimal('0'))
-                    row[f"m_{pk}_a_{i}"] = _dec_to_float(val)
+            _fill_airline_columns(row, periods, airlines, ind_by_name_nocode.get(ind_name, {}))
             return row
 
-        pivot_rows = []
-        for section_key in REGULARITY_ORDER:
-            codes = GA12_CODES_BY_SECTION.get(section_key, [])
-            codes_in_db = [c for c in codes if c in code_to_row]
-            if not codes_in_db:
-                continue
-            disp = GA12_SECTION_TITLE.get(section_key, section_key)
-            pivot_rows.append(_pivot_section_header_row(keys, disp))
-            vtom_done = False
-            for code in codes_in_db:
-                if code in GA12_DETAIL_TON_CODES and not vtom_done:
-                    pivot_rows.append(_pivot_subheading_row(keys, GA12_SUBHEADING_VTOM))
-                    vtom_done = True
-                row = data_row_for_code(code)
-                if row:
-                    pivot_rows.append(row)
+        # Свод по всем АК не ставит «в том числе» по связи parent_id: строка
+        # показателя здесь одна на код, а не на пару (раздел, название).
+        pivot_rows = _emit_form_rows(keys, code_to_row, fill_cells_for_code)
 
         orphan_codes = sorted(
             [c for c in ind_by_code.keys() if c not in known_codes and c in code_to_row],
@@ -486,30 +511,29 @@ class DataController:
                 'indicators': n_data_rows,
                 'airlines': len(airlines),
                 'months': _period_count(periods),
-                'records': len(records)
+                'records': n_records
             }
         }
     
     def _compute_airline_routes_pivot(
-        self, records: List[Any], filters: Optional[Dict]
+        self, rows: List[Any], filters: Optional[Dict]
     ) -> Dict[str, Any]:
-        """Общая сетка 12-ГА: месяцы × виды маршрута + «Всего» (данные уже отфильтрованы по АК)."""
+        """Общая сетка 12-ГА: месяцы × виды маршрута + ИТОГО (выборка уже по одной АК)."""
         data = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: Decimal("0"))))
         periods_seen: Set[tuple] = set()
+        name_to_id: Dict[str, int] = {}
+        n_records = 0
 
-        for rec in records:
-            if not rec.indicator or not rec.shipping or not rec.shipping.route:
-                continue
-            ind_name = rec.indicator.name.strip()
-            reg_key = _norm_regularity(rec.shipping.route.regularity)
-            rt_key = _norm_route_type(rec.shipping.route.type)
-            period = _record_period(rec)
+        for row in rows:
+            ind_name = (row.indicator_name or "").strip()
+            reg_key = _norm_regularity(row.regularity)
+            rt_key = _norm_route_type(row.route_type)
+            period = _aggregate_period(row)
 
             periods_seen.add(period)
-            if rec.value is not None:
-                data[(reg_key, ind_name)][period][rt_key] += rec.value
-
-        name_to_id = _name_to_indicator_id_from_records(records)
+            n_records += row.records
+            name_to_id.setdefault(ind_name, row.indicator_id)
+            data[(reg_key, ind_name)][period][rt_key] += _aggregate_total(row)
         code_to_indicator: Dict[str, Indicator] = {}
         with get_session() as session:
             id_to_code, id_to_parent_id = _load_indicator_graph(session)
@@ -548,42 +572,22 @@ class DataController:
             last = col - 1
             groups.append((first, last, _period_label(period)))
 
-        pivot_rows: List[Dict[str, Any]] = []
-        for section_key in REGULARITY_ORDER:
-            codes = GA12_CODES_BY_SECTION.get(section_key, [])
-            codes_in_db = [c for c in codes if c in code_to_indicator]
-            if not codes_in_db:
-                continue
-            sec_title = GA12_SECTION_TITLE.get(section_key, section_key)
-            pivot_rows.append(_pivot_section_header_row(keys, sec_title))
-            vtom_done = False
-            for code in codes_in_db:
-                ind = code_to_indicator[code]
-                ind_name = ind.name.strip()
-                if code in GA12_DETAIL_TON_CODES and not vtom_done:
-                    pivot_rows.append(_pivot_subheading_row(keys, GA12_SUBHEADING_VTOM))
-                    vtom_done = True
-                if _emit_vtom_before_row(
-                    code, name_to_id, id_to_code, id_to_parent_id, ind_name, vtom_done
-                ):
-                    pivot_rows.append(_pivot_subheading_row(keys, GA12_SUBHEADING_VTOM))
-                    vtom_done = True
-                row = {
-                    "indicator": ind_name,
-                    "measure": (ind.measure or "").strip(),
-                    "code": code,
-                }
-                for period in periods:
-                    inner = data.get((section_key, ind_name))
-                    period_data = inner.get(period, {}) if inner is not None else {}
-                    pk = _period_col_key(period)
-                    for rt in route_types_to_show:
-                        val = period_data.get(rt, Decimal("0"))
-                        row[f"m_{pk}_rt_{rt}"] = _dec_to_float(val)
-                    total_keys = _route_type_keys_for_total_sum(route_types_to_show)
-                    total_row = sum(period_data.get(k, Decimal("0")) for k in total_keys)
-                    row[f"m_{pk}_total"] = _dec_to_float(total_row)
-                pivot_rows.append(row)
+        total_keys = _route_type_keys_for_total_sum(route_types_to_show)
+
+        def fill_cells(row, section_key, code, ind_name):
+            inner = data.get((section_key, ind_name))
+            for period in periods:
+                period_data = inner.get(period, {}) if inner is not None else {}
+                pk = _period_col_key(period)
+                for rt in route_types_to_show:
+                    row[f"m_{pk}_rt_{rt}"] = _dec_to_float(period_data.get(rt, Decimal("0")))
+                total = sum(period_data.get(k, Decimal("0")) for k in total_keys)
+                row[f"m_{pk}_total"] = _dec_to_float(total)
+
+        pivot_rows = _emit_form_rows(
+            keys, code_to_indicator, fill_cells,
+            vtom_context=(name_to_id, id_to_code, id_to_parent_id),
+        )
 
         n_indicators = _count_ga12_data_rows(pivot_rows)
 
@@ -594,23 +598,19 @@ class DataController:
             "groups": groups,
             "periods": periods,
             "n_indicators": n_indicators,
-            "n_records": len(records),
+            "n_records": n_records,
         }
 
     def _load_pivot_multi_airline_by_routes(self, filters: Dict) -> Dict[str, Any]:
         """Несколько АК: по маршрутам; внутри каждого месяца — все выбранные а/к (без данных — нули)."""
-        records = (
-            AirlineIndicatorService.filter_indicators(filters)
-            if filters
-            else AirlineIndicatorService.get_all_indicators()
-        )
+        aggregate = AirlineIndicatorService.aggregate(filters)
 
         f = filters or {}
         if f.get("airline_ids"):
             ids = [int(x) for x in f["airline_ids"]]
             with get_session() as session:
-                rows = session.query(Airline).filter(Airline.id.in_(ids)).all()
-            id_to_name = {a.id: a.name.strip() for a in rows}
+                selected = session.query(Airline).filter(Airline.id.in_(ids)).all()
+            id_to_name = {a.id: a.name.strip() for a in selected}
             airline_rows = [(i, id_to_name[i]) for i in ids if i in id_to_name]
         else:
             with get_session() as session:
@@ -621,10 +621,8 @@ class DataController:
 
         if not airline_rows:
             seen: Dict[int, str] = {}
-            for rec in records:
-                if rec.shipping and rec.shipping.airline:
-                    al = rec.shipping.airline
-                    seen[al.id] = al.name.strip()
+            for row in aggregate:
+                seen[row.airline_id] = (row.airline_name or "").strip()
             airline_rows = sorted(seen.items(), key=lambda x: x[1])
 
         # (регулярность, имя показателя) -> период -> airline_id -> route_type -> сумма
@@ -636,22 +634,18 @@ class DataController:
             )
         )
         periods_seen: Set[tuple] = set()
+        name_to_id: Dict[str, int] = {}
+        n_records = 0
 
-        for rec in records:
-            if not rec.indicator or not rec.shipping or not rec.shipping.route:
-                continue
-            if not rec.shipping.airline:
-                continue
-            aid = rec.shipping.airline.id
-            ind_name = rec.indicator.name.strip()
-            reg_key = _norm_regularity(rec.shipping.route.regularity)
-            rt_key = _norm_route_type(rec.shipping.route.type)
-            period = _record_period(rec)
+        for row in aggregate:
+            ind_name = (row.indicator_name or "").strip()
+            reg_key = _norm_regularity(row.regularity)
+            rt_key = _norm_route_type(row.route_type)
+            period = _aggregate_period(row)
             periods_seen.add(period)
-            if rec.value is not None:
-                data[(reg_key, ind_name)][period][aid][rt_key] += rec.value
-
-        name_to_id = _name_to_indicator_id_from_records(records)
+            n_records += row.records
+            name_to_id.setdefault(ind_name, row.indicator_id)
+            data[(reg_key, ind_name)][period][row.airline_id][rt_key] += _aggregate_total(row)
         code_to_indicator: Dict[str, Indicator] = {}
         with get_session() as session:
             id_to_code, id_to_parent_id = _load_indicator_graph(session)
@@ -690,48 +684,27 @@ class DataController:
             last = col - 1
             groups.append((first, last, _period_label(period)))
 
-        pivot_rows: List[Dict[str, Any]] = []
-        for section_key in REGULARITY_ORDER:
-            codes = GA12_CODES_BY_SECTION.get(section_key, [])
-            codes_in_db = [c for c in codes if c in code_to_indicator]
-            if not codes_in_db:
-                continue
-            sec_title = GA12_SECTION_TITLE.get(section_key, section_key)
-            pivot_rows.append(_pivot_section_header_row(keys, sec_title))
-            vtom_done = False
-            for code in codes_in_db:
-                ind = code_to_indicator[code]
-                ind_name = ind.name.strip()
-                if code in GA12_DETAIL_TON_CODES and not vtom_done:
-                    pivot_rows.append(_pivot_subheading_row(keys, GA12_SUBHEADING_VTOM))
-                    vtom_done = True
-                if _emit_vtom_before_row(
-                    code, name_to_id, id_to_code, id_to_parent_id, ind_name, vtom_done
-                ):
-                    pivot_rows.append(_pivot_subheading_row(keys, GA12_SUBHEADING_VTOM))
-                    vtom_done = True
-                row = {
-                    "indicator": ind_name,
-                    "measure": (ind.measure or "").strip(),
-                    "code": code,
-                }
-                inner = data.get((section_key, ind_name))
-                for period in periods:
-                    period_bucket = inner[period] if inner is not None else None
-                    pk = _period_col_key(period)
-                    for aid, _ in airline_rows:
-                        for rt in route_types_to_show:
-                            val = Decimal("0")
-                            if period_bucket is not None:
-                                val = period_bucket[aid][rt]
-                            row[f"m_{pk}_aid_{aid}_rt_{rt}"] = _dec_to_float(val)
-                        total_keys = _route_type_keys_for_total_sum(route_types_to_show)
-                        total_row = Decimal("0")
-                        if period_bucket is not None:
-                            for k in total_keys:
-                                total_row += period_bucket[aid][k]
-                        row[f"m_{pk}_aid_{aid}_total"] = _dec_to_float(total_row)
-                pivot_rows.append(row)
+        total_keys = _route_type_keys_for_total_sum(route_types_to_show)
+
+        def fill_cells(row, section_key, code, ind_name):
+            inner = data.get((section_key, ind_name))
+            for period in periods:
+                period_bucket = inner[period] if inner is not None else None
+                pk = _period_col_key(period)
+                for aid, _ in airline_rows:
+                    for rt in route_types_to_show:
+                        val = period_bucket[aid][rt] if period_bucket is not None else Decimal("0")
+                        row[f"m_{pk}_aid_{aid}_rt_{rt}"] = _dec_to_float(val)
+                    total = Decimal("0")
+                    if period_bucket is not None:
+                        for key in total_keys:
+                            total += period_bucket[aid][key]
+                    row[f"m_{pk}_aid_{aid}_total"] = _dec_to_float(total)
+
+        pivot_rows = _emit_form_rows(
+            keys, code_to_indicator, fill_cells,
+            vtom_context=(name_to_id, id_to_code, id_to_parent_id),
+        )
 
         n_indicators = _count_ga12_data_rows(pivot_rows)
 
@@ -743,7 +716,7 @@ class DataController:
             "stats": {
                 "indicators": n_indicators,
                 "months": _period_count(periods),
-                "records": len(records),
+                "records": n_records,
                 "airlines": len(airline_rows),
                 "pivot_multi_airline_routes": True,
             },
@@ -754,13 +727,13 @@ class DataController:
         airline_filters = filters.copy() if filters else {}
         airline_filters["airline_id"] = airline_id
 
-        records = AirlineIndicatorService.filter_indicators(airline_filters)
+        rows = AirlineIndicatorService.aggregate(airline_filters)
 
         with get_session() as session:
             al = session.get(Airline, airline_id)
             airline_name = al.name.strip() if al else ""
 
-        base = self._compute_airline_routes_pivot(records, filters)
+        base = self._compute_airline_routes_pivot(rows, filters)
         return {
             "rows": base["rows"],
             "headers": base["headers"],
@@ -779,7 +752,7 @@ class DataController:
         airline_filters = filters.copy() if filters else {}
         airline_filters["airline_id"] = airline_id
 
-        records = AirlineIndicatorService.filter_indicators(airline_filters)
+        aggregate = AirlineIndicatorService.aggregate(airline_filters)
 
         with get_session() as session:
             al = session.get(Airline, airline_id)
@@ -787,17 +760,18 @@ class DataController:
 
         data = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: Decimal("0"))))
         periods_seen: Set[tuple] = set()
+        name_to_id: Dict[str, int] = {}
+        n_records = 0
 
-        for rec in records:
-            if not rec.indicator or not rec.shipping or not rec.shipping.route:
-                continue
-            ind_name = rec.indicator.name.strip()
-            reg_key = _norm_regularity(rec.shipping.route.regularity)
-            rt_key = _norm_route_type(rec.shipping.route.type)
-            period = _record_period(rec)
+        for row in aggregate:
+            ind_name = (row.indicator_name or "").strip()
+            reg_key = _norm_regularity(row.regularity)
+            rt_key = _norm_route_type(row.route_type)
+            period = _aggregate_period(row)
             periods_seen.add(period)
-            if rec.value is not None:
-                data[(reg_key, ind_name)][period][rt_key] += rec.value
+            n_records += row.records
+            name_to_id.setdefault(ind_name, row.indicator_id)
+            data[(reg_key, ind_name)][period][rt_key] += _aggregate_total(row)
 
         agg: Dict[tuple, Dict[Any, Decimal]] = defaultdict(lambda: defaultdict(lambda: Decimal("0")))
         for (_reg_key, _ind_name), md in data.items():
@@ -807,7 +781,6 @@ class DataController:
                 keys = ga12_total_route_types(rt_dict)
                 agg[(_reg_key, _ind_name)][period] += sum(rt_dict[k] for k in keys)
 
-        name_to_id = _name_to_indicator_id_from_records(records)
         code_to_indicator: Dict[str, Indicator] = {}
         with get_session() as session:
             id_to_code, id_to_parent_id = _load_indicator_graph(session)
@@ -834,39 +807,19 @@ class DataController:
         )
         groups: List[tuple] = []
 
-        pivot_rows: List[Dict[str, Any]] = []
-        for section_key in REGULARITY_ORDER:
-            codes = GA12_CODES_BY_SECTION.get(section_key, [])
-            codes_in_db = [c for c in codes if c in code_to_indicator]
-            if not codes_in_db:
-                continue
-            sec_title = GA12_SECTION_TITLE.get(section_key, section_key)
-            pivot_rows.append(_pivot_section_header_row(keys, sec_title))
-            vtom_done = False
-            for code in codes_in_db:
-                ind = code_to_indicator[code]
-                ind_name = ind.name.strip()
-                if code in GA12_DETAIL_TON_CODES and not vtom_done:
-                    pivot_rows.append(_pivot_subheading_row(keys, GA12_SUBHEADING_VTOM))
-                    vtom_done = True
-                if _emit_vtom_before_row(
-                    code, name_to_id, id_to_code, id_to_parent_id, ind_name, vtom_done
-                ):
-                    pivot_rows.append(_pivot_subheading_row(keys, GA12_SUBHEADING_VTOM))
-                    vtom_done = True
-                row: Dict[str, Any] = {
-                    "indicator": ind_name,
-                    "measure": (ind.measure or "").strip(),
-                    "code": code,
-                }
-                inner = agg.get((section_key, ind_name))
-                total = Decimal("0")
-                for period in periods:
-                    val = inner.get(period, Decimal("0")) if inner is not None else Decimal("0")
-                    row[f"m_{_period_col_key(period)}"] = _dec_to_float(val)
-                    total += val
-                row["total"] = _dec_to_float(total)
-                pivot_rows.append(row)
+        def fill_cells(row, section_key, code, ind_name):
+            inner = agg.get((section_key, ind_name))
+            total = Decimal("0")
+            for period in periods:
+                val = inner.get(period, Decimal("0")) if inner is not None else Decimal("0")
+                row[f"m_{_period_col_key(period)}"] = _dec_to_float(val)
+                total += val
+            row["total"] = _dec_to_float(total)
+
+        pivot_rows = _emit_form_rows(
+            keys, code_to_indicator, fill_cells,
+            vtom_context=(name_to_id, id_to_code, id_to_parent_id),
+        )
 
         n_indicators = _count_ga12_data_rows(pivot_rows)
 
@@ -879,7 +832,7 @@ class DataController:
                 "airline_name": airline_name,
                 "indicators": n_indicators,
                 "months": _period_count(periods),
-                "records": len(records),
+                "records": n_records,
             },
         }
 
@@ -905,19 +858,17 @@ class DataController:
         airport_filters = filters.copy() if filters else {}
         airport_filters["airport_id"] = airport_id
 
-        records = AirportIndicatorService.filter_indicators(airport_filters)
+        rows = AirportIndicatorService.aggregate(airport_filters)
 
         agg: Dict[str, Decimal] = {}
-        for rec in records:
-            ind = rec.indicator
-            if not ind:
-                continue
-            code = (ind.code or "").strip()
+        n_records = 0
+        for row in rows:
+            code = (row.indicator_code or "").strip()
+            n_records += row.records
             if not code:
                 continue
             canon = GA15_CODE_ALIASES.get(code, code)
-            if rec.value is not None:
-                agg[canon] = agg.get(canon, Decimal("0")) + rec.value
+            agg[canon] = agg.get(canon, Decimal("0")) + _aggregate_total(row)
 
         airport_name = ""
         with get_session() as session:
@@ -966,7 +917,7 @@ class DataController:
             "stats": {
                 "airport_name": airport_name,
                 "layout_ga15": True,
-                "records": len(records),
+                "records": n_records,
                 "indicators": n_data_lines,
             },
         }
