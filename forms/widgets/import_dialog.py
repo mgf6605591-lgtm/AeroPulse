@@ -53,12 +53,6 @@ class ImportDialog(QDialog):
         if hasattr(self, 'parent') and hasattr(self.parent(), 'refresh_entities'):
             self.parent().refresh_entities(self.get_type(), self.entity_combo)
     
-    def set_airlines(self, airlines: list):
-        """Устанавливает список авиакомпаний для выбора (для обратной совместимости)"""
-        self.entity_combo.clear()
-        for airline in airlines:
-            self.entity_combo.addItem(airline)
-    
     def set_entities(self, entities: list, entity_type: str):
         """Устанавливает список предприятий с ID"""
         self.entity_combo.clear()
@@ -99,7 +93,3 @@ class ImportDialog(QDialog):
     def get_entity_id(self) -> int:
         """Возвращает ID выбранного предприятия"""
         return self.entity_combo.currentData()
-    
-    def get_entity_name(self) -> str:
-        """Возвращает название выбранного предприятия"""
-        return self.entity_combo.currentText().strip()

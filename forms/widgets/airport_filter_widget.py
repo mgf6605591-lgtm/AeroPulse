@@ -155,13 +155,6 @@ class AirportFilterWidget(QGroupBox):
         self._set_combo_value(self.from_month, "January")
         self._set_combo_value(self.to_month, "December")
 
-    def block_signals(self, block: bool):
-        self.airport_combo.blockSignals(block)
-        self.indicator_btn.blockSignals(block)
-        self.from_month.blockSignals(block)
-        self.from_year.blockSignals(block)
-        self.to_month.blockSignals(block)
-        self.to_year.blockSignals(block)
 
     def reload_reference_lists(self):
         """Перечитать справочники, сохранив выбор аэропорта, показателей и период.

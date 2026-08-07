@@ -23,14 +23,6 @@ class AirlineIndController:
         result = session.execute(query)
         return result.unique().scalars().all()
 
-    @classmethod
-    def get_indicator_by_id(cls, session, id: int) -> AirlineIndicators:
-        query = select(AirlineIndicators).where(AirlineIndicators.id == id).options(
-            joinedload(AirlineIndicators.indicator),
-            joinedload(AirlineIndicators.shipping).joinedload(Shipping.airline)
-        )
-        result = session.execute(query)
-        return result.unique().scalar_one_or_none()
 
     @classmethod
     def filter_indicators(cls, session, filters: Dict) -> List[AirlineIndicators]:
@@ -93,11 +85,3 @@ class AirlineIndController:
 
         return result
 
-    @classmethod
-    def delete_indicator(cls, session, id: int) -> bool:
-        indicator = cls.get_indicator_by_id(session, id)
-        if indicator:
-            session.delete(indicator)
-            session.commit()
-            return True
-        return False

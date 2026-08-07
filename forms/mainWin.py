@@ -14,7 +14,7 @@ ensure_qt_platform_plugins()
 import traceback
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QTabWidget,
-    QPushButton, QFileDialog, QMessageBox, QStatusBar, QApplication
+    QPushButton, QFileDialog, QMessageBox, QApplication
 )
 from PyQt6.QtCore import Qt
 from db.database import get_session
@@ -50,7 +50,6 @@ class MainWindow(QMainWindow):
 
         self._setup_toolbar(main_layout)
         self._setup_tabs(main_layout)
-        self.setStatusBar(QStatusBar())
 
         self.tabs.currentChanged.connect(self._on_main_tab_changed)
 

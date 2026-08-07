@@ -3,7 +3,7 @@ from typing import List, Optional
 
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.orm import Mapped, mapped_column, relationship, declarative_base
-from sqlalchemy import Boolean, ForeignKey, Index, Integer, String, ForeignKey, Float, DateTime, DECIMAL
+from sqlalchemy import Boolean, ForeignKey, Index, Integer, String
 from datetime import datetime
 from db.models.enums import RouteType, UserPosition, ShippingRegularity, Months
 from db.models.types import ExactDecimal

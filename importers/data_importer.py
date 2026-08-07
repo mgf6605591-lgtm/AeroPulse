@@ -4,8 +4,8 @@ from sqlalchemy.exc import OperationalError, IntegrityError
 from sqlalchemy.orm import sessionmaker
 from db.database import get_session, engine
 from db.models.entities import (
-    Airline, Airport, Indicator, Shipping, Route, 
-    AirlineIndicators, AirportIndicators, Locality
+    Airline, Airport, Indicator, Shipping, Route,
+    AirlineIndicators, AirportIndicators
 )
 from db.models.enums import ShippingRegularity, RouteType, Months
 from utils.constants import GA12_DETAIL_TON_PARENT

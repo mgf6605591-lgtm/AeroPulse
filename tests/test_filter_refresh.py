@@ -146,17 +146,6 @@ class AirlineFilterRefreshTest(WidgetCase):
 
         self.assertEqual([100], widget.get_indicator_filter_ids())
 
-    def test_switching_mode_still_clears_the_selection(self):
-        """Смена вкладки — другой справочник: прежний выбор к нему не относится."""
-        from utils.constants import MODE_AIRPORT
-
-        widget = self.make_widget()
-        widget.entity_btn._selected = {1}
-
-        widget.switch_mode(MODE_AIRPORT)
-
-        self.assertIsNone(widget.get_airport_filter_ids())
-
 
 class AirportFilterRefreshTest(WidgetCase):
     """Вкладка «Аэропорты»: обновление списков не сбрасывает настройки (BUG-25)."""

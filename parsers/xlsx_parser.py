@@ -78,9 +78,6 @@ class XLSXParser(BaseParser):
             except Exception:
                 airline_name = ""
         
-        # Код авиакомпании (генерируем из названия)
-        airline_code = airline_name[:3].upper() if airline_name else "UNK"
-        
         # Период: явные параметры вызова > лист «Титул» D13. Поиска «где-нибудь в шапке»
         # больше нет: он подхватывал год из реквизитов бланка («приказ Росстата от 2019 г.»)
         # и уводил отчёт в чужой период (DATA-3).
@@ -99,7 +96,6 @@ class XLSXParser(BaseParser):
         # Добавляем информацию о предприятии в каждый показатель
         for indicator in indicators:
             indicator['airline_name'] = airline_name
-            indicator['airline_code'] = airline_code
             indicator['entity_type'] = entity_type or 'airline'
             indicator['entity_id'] = entity_id
         
@@ -114,7 +110,6 @@ class XLSXParser(BaseParser):
             "sheet_name": sheet_name,
             "airline": {
                 "name": airline_name,
-                "code": airline_code,
                 "id": entity_id,
             },
             "month": month,

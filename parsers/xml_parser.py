@@ -71,8 +71,6 @@ class XMLParser(BaseParser):
         else:
             airline_name = ""
 
-        airline_code = airline_name[:3].upper() if airline_name else "UNK"
-
         month_res = month or cls._month_from_period(period) or cls._month_from_meta_filename(file_name)
         year_res = year if year is not None else file_year
         # Заглушек «январь 2025» здесь нет: неопределённый период возвращается как None,
@@ -82,7 +80,6 @@ class XMLParser(BaseParser):
 
         for ind in indicators:
             ind["airline_name"] = airline_name
-            ind["airline_code"] = airline_code
             ind["entity_type"] = entity_type or "airline"
             ind["entity_id"] = entity_id
 
@@ -91,7 +88,6 @@ class XMLParser(BaseParser):
             "entity_id": entity_id,
             "airline": {
                 "name": airline_name,
-                "code": airline_code,
                 "id": entity_id,
             },
             "month": month_res,

@@ -145,16 +145,6 @@ class FilterWidget(QGroupBox):
     def _on_filters_changed(self):
         self.filters_changed.emit()
 
-    def switch_mode(self, mode: int):
-        self.current_mode = mode
-        self.entity_label.setText("Авиакомпания:" if mode == MODE_AIRLINE else "Аэропорт:")
-        self.route_btn.setVisible(mode == MODE_AIRLINE)
-        vis_air = mode == MODE_AIRLINE
-        self.pivot_layout_label.setVisible(vis_air)
-        self.pivot_layout_combo.setVisible(vis_air)
-        self._load_entities()
-        self._load_indicators()
-
     def reload_reference_lists(self):
         """Перечитать списки предприятий и показателей: после импорта и правки справочников.
 
@@ -211,12 +201,3 @@ class FilterWidget(QGroupBox):
         self.pivot_layout_combo.setCurrentIndex(0)
         self._set_default_period()
 
-    def block_signals(self, block: bool):
-        self.entity_btn.blockSignals(block)
-        self.indicator_btn.blockSignals(block)
-        self.route_btn.blockSignals(block)
-        self.pivot_layout_combo.blockSignals(block)
-        self.from_month.blockSignals(block)
-        self.from_year.blockSignals(block)
-        self.to_month.blockSignals(block)
-        self.to_year.blockSignals(block)
