@@ -2,10 +2,14 @@
 
 import unittest
 from decimal import Decimal
+from unittest.mock import patch
 
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 
-from db.models.entities import Airline, AirlineIndicators, Indicator
+from db.models.entities import (
+    Airline, AirlineIndicators, Airport, AirportIndicators, Indicator, Locality
+)
 from importers.data_importer import DataImporter
 from tests.support import MigratedDbCase
 
@@ -206,6 +210,116 @@ class IndicatorCodeTest(ImportCase):
 
         # Код без кода — первые 10 символов названия.
         self.assertIn("Показатель", self.indicators_by_code())
+
+
+class LockedOnce:
+    """Сессия, которая один раз отвечает «database is locked».
+
+    Так выглядит занятая другим процессом база SQLite — то, ради чего и написан
+    механизм повтора.
+    """
+
+    def __init__(self, session):
+        self._session = session
+        self.failed = False
+
+    def __getattr__(self, name):
+        return getattr(self._session, name)
+
+    def commit(self):
+        if not self.failed:
+            self.failed = True
+            raise OperationalError("INSERT INTO ...", {}, Exception("database is locked"))
+        return self._session.commit()
+
+
+class DatabaseLockTest(MigratedDbCase):
+    """Повтор при блокировке базы — одинаково для обеих веток импорта (BUG-23)."""
+
+    def setUp(self):
+        super().setUp()
+        self.Session = sessionmaker(bind=self.engine, expire_on_commit=False)
+        with self.Session() as session:
+            session.add(Airline(id=1, code="AAA", name="Тестовая АК"))
+            session.add(Locality(id=1, name="Город"))
+            session.add(Airport(id=1, code="XXX", name="Тестовый аэропорт", locality_id=1))
+            session.commit()
+
+        # Повтор берёт новую сессию через get_session и ждёт между попытками.
+        session_patch = patch("importers.data_importer.get_session", self.Session)
+        session_patch.start()
+        self.addCleanup(session_patch.stop)
+        sleep_patch = patch("importers.data_importer.time.sleep")
+        sleep_patch.start()
+        self.addCleanup(sleep_patch.stop)
+
+    def airport_payload(self):
+        return {
+            "entity_type": "airport",
+            "data_type": "airport",
+            "entity_id": 1,
+            "airport": {"name": "Тестовый аэропорт", "id": 1},
+            "month": "January",
+            "year": 2025,
+            "indicators": [{
+                "indicator_code": "15ГА-R05-ВС",
+                "indicator_name": "Внутренние регулярные — Воздушные суда",
+                "measure": "ед.",
+                "value": Decimal("610"),
+            }],
+        }
+
+    def airline_payload(self):
+        return {
+            "entity_type": "airline",
+            "data_type": "airline",
+            "entity_id": 1,
+            "airline": {"name": "Тестовая АК", "code": "AAA", "id": 1},
+            "month": "January",
+            "year": 2025,
+            "indicators": [indicator_row("965", "Самолето-километры", "100")],
+        }
+
+    def test_airport_import_is_retried(self):
+        """Прежде общий `except Exception` съедал блокировку, и повтор не начинался."""
+        with self.Session() as session:
+            result = DataImporter.import_data(LockedOnce(session), self.airport_payload())
+
+        self.assertTrue(result["success"], result.get("message"))
+        with self.Session() as session:
+            self.assertEqual(1, session.query(AirportIndicators).count())
+
+    def test_airline_import_is_retried(self):
+        with self.Session() as session:
+            result = DataImporter.import_data(LockedOnce(session), self.airline_payload())
+
+        self.assertTrue(result["success"], result.get("message"))
+        with self.Session() as session:
+            self.assertEqual(1, session.query(AirlineIndicators).count())
+
+    def test_other_database_errors_are_not_retried(self):
+        """Не всякая ошибка базы — блокировка: повторять «no such table» незачем."""
+
+        class BrokenOnce(LockedOnce):
+            def commit(self):
+                raise OperationalError("SELECT ...", {}, Exception("no such table: airportInd"))
+
+        with self.Session() as session:
+            result = DataImporter.import_data(BrokenOnce(session), self.airport_payload())
+
+        self.assertFalse(result["success"])
+        self.assertIn("Ошибка базы данных", result["message"])
+
+    def test_unexpected_error_names_the_branch(self):
+        class Failing(LockedOnce):
+            def commit(self):
+                raise ValueError("что-то пошло не так")
+
+        with self.Session() as session:
+            result = DataImporter.import_data(Failing(session), self.airport_payload())
+
+        self.assertFalse(result["success"])
+        self.assertIn("аэропорта", result["message"])
 
 
 if __name__ == "__main__":
