@@ -932,20 +932,24 @@ class DataController:
                 "ID", "Авиакомпания", "Код а/к", "Показатель", "Месяц", "Год",
                 "Значение", "Ед. изм.", "Тип маршрута", "Регулярность",
             ]
+            # Поля снимка строки (services/detail_rows.py), а не пути по связям
+            # ORM: за пределами сессии связей уже нет, и путь вроде
+            # 'shipping.airline.name' держался на точно подобранных joinedload
+            # (BUG-14).
             attrs = [
-                'id', 'shipping.airline.name', 'shipping.airline.code',
-                'indicator.name', 'month', 'year', 'value',
-                'indicator.measure', 'shipping.route.type', 'shipping.route.regularity'
+                'id', 'entity_name', 'entity_code',
+                'indicator', 'month', 'year', 'value',
+                'measure', 'route_type', 'regularity',
             ]
-            records = AirlineIndicatorService.filter_indicators(filters) if filters else AirlineIndicatorService.get_all_indicators()
+            records = AirlineIndicatorService.detail_rows(filters)
         else:
             headers = ["ID", "Аэропорт", "Код", "Показатель", "Месяц", "Год", "Значение", "Ед. изм.", "Нас. пункт"]
             attrs = [
-                'id', 'airport.name', 'airport.code',
-                'indicator.name', 'month', 'year', 'value',
-                'indicator.measure', 'airport.locality.name'
+                'id', 'entity_name', 'entity_code',
+                'indicator', 'month', 'year', 'value',
+                'measure', 'locality',
             ]
-            records = AirportIndicatorService.filter_indicators(filters) if filters else AirportIndicatorService.get_all_indicators()
+            records = AirportIndicatorService.detail_rows(filters)
         
         return {
             'headers': headers,

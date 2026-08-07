@@ -1,16 +1,18 @@
 # services/airport_ind_service.py
+"""Отчётность аэропортов: граница сессии и форма выдачи (ARCH-1, BUG-14).
+
+То же, что и у авиакомпаний: служба отвечает за то, чтобы сессия не переживала
+вызов, а наружу уходили суммы для свода или снимки строк для таблицы — но не
+объекты ORM, у которых за пределами сессии не осталось связей.
+"""
 from typing import Any, Dict, List
+
 from controllers.AirportIndController import AirportIndController
 from db.database import get_session
-from db.models.entities import AirportIndicators
+from services.detail_rows import DetailRow, from_airport_indicator
 
 
 class AirportIndicatorService:
-
-    @classmethod
-    def get_all_indicators(cls) -> List[AirportIndicators]:
-        with get_session() as session:
-            return AirportIndController.get_all_indicators(session)
 
     @classmethod
     def aggregate(cls, filters: Dict) -> List[Any]:
@@ -19,6 +21,11 @@ class AirportIndicatorService:
             return AirportIndController.aggregate(session, filters or {})
 
     @classmethod
-    def filter_indicators(cls, filters: Dict) -> List[AirportIndicators]:
+    def detail_rows(cls, filters: Dict) -> List[DetailRow]:
+        """Строки подробной таблицы — снимками, а не записями ORM (BUG-14)."""
         with get_session() as session:
-            return AirportIndController.filter_indicators(session, filters)
+            if filters:
+                records = AirportIndController.filter_indicators(session, filters)
+            else:
+                records = AirportIndController.get_all_indicators(session)
+            return [from_airport_indicator(record) for record in records]
