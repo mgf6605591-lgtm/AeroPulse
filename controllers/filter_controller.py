@@ -5,7 +5,7 @@ from sqlalchemy import func
 from controllers.reference_cache import ReferenceDataCache, reference_cache
 from db.database import get_session
 from db.models.entities import Airline, Airport, Indicator, AirlineIndicators, AirportIndicators
-from utils.constants import MONTHS_LIST, MODE_AIRLINE, MODE_AIRPORT
+from utils.constants import MONTHS_LIST, MODE_AIRLINE
 
 log = logging.getLogger(__name__)
 

@@ -1,7 +1,7 @@
 from typing import List, Tuple, Optional
 from PyQt6.QtWidgets import QHeaderView
 from PyQt6.QtCore import Qt, QRect, QSize
-from PyQt6.QtGui import QPainter, QColor, QPalette
+from PyQt6.QtGui import QPainter, QPalette
 
 
 class MultiLevelHeaderView(QHeaderView):

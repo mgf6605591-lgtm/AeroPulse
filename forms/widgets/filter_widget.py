@@ -1,6 +1,5 @@
 # forms/widgets/filter_widget.py
 from PyQt6.QtWidgets import (
-    QWidget,
     QHBoxLayout,
     QVBoxLayout,
     QComboBox,

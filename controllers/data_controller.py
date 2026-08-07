@@ -24,7 +24,6 @@ from utils.constants import (
     MODE_AIRLINE,
     PIVOT_LAYOUT_BY_ROUTES,
     PIVOT_LAYOUT_SUMMARY,
-    MODE_AIRPORT,
 )
 from utils.ga12_layout import ga12_total_route_types
 from utils.ga15_airport_layout import (

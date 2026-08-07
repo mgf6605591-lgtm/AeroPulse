@@ -13,7 +13,7 @@
 Наружу отдаются словари, а не объекты ORM: за пределами сессии они уже отсоединены,
 и обращение к их полям падает (BUG-14).
 """
-from dataclasses import dataclass, field as dc_field
+from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from sqlalchemy import func

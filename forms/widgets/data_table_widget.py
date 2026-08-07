@@ -6,7 +6,6 @@ from db.models.sqlalchemy_table_model import SQLAlchemyTableModel
 from db.models.pivot_dict_model import PivotDictModel
 from db.models.multilevel_header import MultiLevelHeaderView
 from controllers.data_controller import DataController
-from controllers.export_controller import ExportController
 from utils.constants import GA12_TOTAL_HEADER, ROUTE_TYPE_NAMES, VIEW_PIVOT, VIEW_DETAIL
 
 

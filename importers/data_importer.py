@@ -1,8 +1,7 @@
 # importers/data_importer.py
 from decimal import Decimal
 from sqlalchemy.exc import OperationalError, IntegrityError
-from sqlalchemy.orm import sessionmaker
-from db.database import get_session, engine
+from db.database import get_session
 from db.models.entities import (
     Airline, Airport, Indicator, Shipping, Route,
     AirlineIndicators, AirportIndicators

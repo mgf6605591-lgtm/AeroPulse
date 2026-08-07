@@ -1,6 +1,5 @@
 # forms/widgets/airport_filter_widget.py
 from PyQt6.QtWidgets import (
-    QWidget,
     QHBoxLayout,
     QVBoxLayout,
     QComboBox,

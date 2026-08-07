@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from db.backup import make_backup
 from db.database import db_path, get_session
-from db.models.entities import Airline, AirlineIndicators, AirportIndicators
+from db.models.entities import AirlineIndicators, AirportIndicators
 from services import journal_service as journal
 from services.import_service import ImportService
 from controllers.filter_controller import FilterController

@@ -31,6 +31,8 @@ MANIFEST
 #   before PyInstaller builds the exe, so as to inject date/other infos into it.
 *.manifest
 *.spec
+# Спека сборки приложения — исходный файл проекта, а не артефакт (INFRA-3)
+!aeropulse.spec
 
 # Installer logs
 pip-log.txt

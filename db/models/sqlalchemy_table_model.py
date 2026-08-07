@@ -1,6 +1,5 @@
 from typing import List, Any, Optional
 from PyQt6.QtCore import QAbstractTableModel, Qt, QModelIndex
-from PyQt6.QtGui import QColor
 from decimal import Decimal
 
 from db.models.roles import RAW_VALUE_ROLE
