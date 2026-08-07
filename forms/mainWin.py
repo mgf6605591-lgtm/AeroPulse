@@ -112,6 +112,18 @@ class MainWindow(QMainWindow):
         self._reload_airline_tab()
         self._reload_airport_tab()
 
+    def _reload_reference_lists(self):
+        """Справочники изменились: сбросить кеш и перечитать списки в обеих вкладках.
+
+        Один вызов на обе вкладки. Прежде инвалидация была точечной: после импорта
+        сбрасывался кеш главного окна (в фильтрах он не участвует) и обновлялась
+        только вкладка аэропортов, поэтому списки на вкладке «Авиакомпании»
+        оставались прежними до перезапуска программы (BUG-7).
+        """
+        self.filter_controller.clear_cache()
+        self.filter_widget_airline.reload_reference_lists()
+        self.airport_filter_widget.reload_reference_lists()
+
     def _on_main_tab_changed(self, idx: int):
         self.current_mode = MODE_AIRLINE if idx == 0 else MODE_AIRPORT
         if idx == 0:
@@ -209,8 +221,7 @@ class MainWindow(QMainWindow):
             report = "\n".join(report_lines)
             if any_success:
                 QMessageBox.information(self, "Импорт завершён", report)
-                self.filter_controller.clear_cache()
-                self.airport_filter_widget.refresh_airport_list()
+                self._reload_reference_lists()
                 self._load_initial_data()
             else:
                 QMessageBox.warning(self, "Импорт не выполнен", report)
@@ -223,13 +234,11 @@ class MainWindow(QMainWindow):
     def open_references(self):
         """Окно ведения справочников.
 
-        После закрытия списки фильтров перечитываются: справочники могли измениться,
-        а FilterController кеширует их до явного сброса.
+        После закрытия списки фильтров перечитываются в обеих вкладках: справочники
+        могли измениться, а кеш держит их до явного сброса.
         """
         ReferenceDialog(self).exec()
-        self.filter_controller.clear_cache()
-        self.filter_widget_airline.reload_reference_lists()
-        self.airport_filter_widget.refresh_airport_list()
+        self._reload_reference_lists()
         self._load_initial_data()
 
     def _import_with_asked_period(self, file_path, entity_type, entity_id, result: dict) -> dict:

@@ -1,6 +1,7 @@
 # controllers/filter_controller.py
-from typing import Dict, Tuple, Any
+from typing import Dict, Optional, Tuple, Any
 from sqlalchemy import func
+from controllers.reference_cache import ReferenceDataCache, reference_cache
 from db.database import get_session
 from db.models.entities import Airline, Airport, Indicator, AirlineIndicators, AirportIndicators
 from utils.constants import MONTHS_LIST, MODE_AIRLINE, MODE_AIRPORT
@@ -9,15 +10,16 @@ from utils.constants import MONTHS_LIST, MODE_AIRLINE, MODE_AIRPORT
 class FilterController:
     """Контроллер для управления фильтрами"""
 
-    def __init__(self):
-        self._entities_cache = {}
-        self._indicators_cache = None
+    def __init__(self, cache: Optional[ReferenceDataCache] = None):
+        # Кеш общий на приложение: свой у каждого экземпляра означал бы, что сброс
+        # после импорта не виден остальным виджетам фильтров (BUG-7, ARCH-7).
+        self._cache = cache if cache is not None else reference_cache
 
     def load_entities(self, mode: int) -> list:
         """Загружает список авиакомпаний или аэропортов (для множественного выбора без пункта «Все»)."""
-        cache_key = f"entities_{mode}"
-        if cache_key in self._entities_cache:
-            return self._entities_cache[cache_key]
+        cached = self._cache.entities(mode)
+        if cached is not None:
+            return cached
 
         try:
             with get_session() as session:
@@ -54,7 +56,7 @@ class FilterController:
                             continue
                         seen.add(eid)
                         result.append((eid, e.name.strip()))
-                self._entities_cache[cache_key] = result
+                self._cache.put_entities(mode, result)
                 return result
         except Exception as e:
             print(f"Ошибка загрузки сущностей: {e}")
@@ -62,8 +64,9 @@ class FilterController:
 
     def load_indicators(self) -> list:
         """Загружает список показателей"""
-        if self._indicators_cache is not None:
-            return self._indicators_cache
+        cached = self._cache.indicators()
+        if cached is not None:
+            return cached
 
         try:
             with get_session() as session:
@@ -76,7 +79,7 @@ class FilterController:
                         continue
                     seen.add(iid)
                     result.append((iid, i.name.strip()))
-                self._indicators_cache = result
+                self._cache.put_indicators(result)
                 return result
         except Exception as e:
             print(f"Ошибка загрузки показателей: {e}")
@@ -175,5 +178,5 @@ class FilterController:
         return filters
 
     def clear_cache(self):
-        self._entities_cache.clear()
-        self._indicators_cache = None
+        """Сбрасывает общий кеш справочников — для всех контроллеров сразу."""
+        self._cache.clear()
