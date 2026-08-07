@@ -12,6 +12,7 @@
 import os
 import tempfile
 import unittest
+from decimal import Decimal
 from unittest.mock import patch
 
 from openpyxl import Workbook
@@ -324,12 +325,14 @@ class RealGa12FileTest(unittest.TestCase):
         «Перевезено пассажиров». Ни одного признака ошибки при этом не было.
         """
         values = self.values()
-        self.assertEqual(452, values[("965", "local")])
-        self.assertEqual(223, values[("642", "local")])
-        self.assertEqual(642, values[("356", "local")])
-        self.assertEqual(27666, values[("792", "local")])
-        self.assertEqual(140.62, values[("168", "local")])
-        self.assertEqual(24.21, values[("168п", "local")])
+        self.assertEqual(Decimal("452"), values[("965", "local")])
+        self.assertEqual(Decimal("223"), values[("642", "local")])
+        self.assertEqual(Decimal("642"), values[("356", "local")])
+        self.assertEqual(Decimal("27666"), values[("792", "local")])
+        # Сравнение именно с Decimal, а не с 140.62: двоичный float таким числом
+        # не является, и равенство здесь не выполнялось бы (BUG-4).
+        self.assertEqual(Decimal("140.62"), values[("168", "local")])
+        self.assertEqual(Decimal("24.21"), values[("168п", "local")])
 
     def test_ton_detail_sums_up_to_its_parent(self):
         """а) пассажирский + б) грузовой + в) почтовый = «Выполненный тоннокилометраж».

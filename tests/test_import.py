@@ -153,6 +153,51 @@ class IndicatorCodeTest(ImportCase):
         self.assertIn("965", by_code)
         self.assertIn("642", by_code)
 
+    def test_repeated_name_does_not_swallow_another_code(self):
+        """DATA-8: названия строк бланка повторяются по разделам.
+
+        «Самолето-километры» стоит и в регулярных перевозках (965), и в
+        нерегулярных (965н). Поиск по названию находил уже созданный 965, строка
+        965н в справочнике не заводилась, а её значения ложились под чужой код —
+        при том, что раздел свода перебирает свои коды и потому оставался пуст.
+        """
+        rows = [
+            indicator_row("965", "Самолето-километры", "100"),
+            indicator_row("965н", "Самолето-километры", "7"),
+        ]
+
+        self.do_import(rows)
+
+        by_code = self.indicators_by_code()
+        self.assertIn("965", by_code)
+        self.assertIn("965н", by_code)
+        self.assertNotEqual(by_code["965"].id, by_code["965н"].id)
+
+    def test_values_stay_under_their_own_code(self):
+        rows = [
+            indicator_row("965", "Самолето-километры", "100"),
+            indicator_row("965н", "Самолето-километры", "7"),
+        ]
+
+        self.do_import(rows)
+
+        with self.Session() as session:
+            values = {
+                r.indicator.code: float(r.value)
+                for r in session.query(AirlineIndicators).all()
+            }
+        self.assertEqual({"965": 100.0, "965н": 7.0}, values)
+
+    def test_nameless_lookup_still_finds_by_name(self):
+        """Запись без кода по-прежнему подхватывает показатель с тем же названием."""
+        self.do_import([indicator_row("965", "Самолето-километры", "100")])
+        row = indicator_row("", "Самолето-километры", "120")
+        row["indicator_code"] = ""
+
+        self.do_import([row])
+
+        self.assertEqual(1, len(self.indicators_by_code()))
+
     def test_name_is_used_when_there_is_no_code(self):
         row = indicator_row("", "Показатель без кода", "1")
         row["indicator_code"] = ""
