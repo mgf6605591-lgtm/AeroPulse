@@ -1,9 +1,11 @@
 """Импортёр: связи детализации показателей и повторная загрузка того же отчёта."""
 
 import unittest
+from collections import Counter
 from decimal import Decimal
 from unittest.mock import patch
 
+from sqlalchemy import event
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 
@@ -210,6 +212,68 @@ class IndicatorCodeTest(ImportCase):
 
         # Код без кода — первые 10 символов названия.
         self.assertIn("Показатель", self.indicators_by_code())
+
+
+class QueryCountTest(ImportCase):
+    """Число запросов не растёт вместе с числом строк файла (PERF-3)."""
+
+    def count_queries(self, indicators) -> Counter:
+        counter = Counter()
+
+        def count(conn, cursor, statement, params, context, executemany):
+            counter[statement.lstrip().split()[0].upper()] += 1
+
+        event.listen(self.engine, "before_cursor_execute", count)
+        try:
+            with self.Session() as session:
+                DataImporter._import_airline_data(session, self.payload(indicators))
+                session.commit()
+        finally:
+            event.remove(self.engine, "before_cursor_execute", count)
+        return counter
+
+    @staticmethod
+    def rows(count: int) -> list:
+        return [indicator_row(f"K{n}", f"Показатель {n}", str(n)) for n in range(count)]
+
+    def test_selects_do_not_grow_with_the_file(self):
+        """Прежде на каждую строку приходилось по три-четыре отдельных запроса."""
+        few = self.count_queries(self.rows(5))["SELECT"]
+        many = self.count_queries(self.rows(50))["SELECT"]
+
+        self.assertEqual(few, many)
+
+    def test_selects_are_a_handful(self):
+        """Справочники, рейсы и строки периода — по одному запросу, а не по строке."""
+        self.assertLessEqual(self.count_queries(self.rows(50))["SELECT"], 10)
+
+    def test_repeat_import_of_unchanged_report_writes_nothing(self):
+        """Значения те же — записывать нечего, хотя проход по файлу полный."""
+        rows = self.rows(20)
+        self.count_queries(rows)
+
+        again = self.count_queries(rows)
+
+        self.assertEqual(0, again["INSERT"])
+        self.assertEqual(0, again["UPDATE"])
+
+
+class DuplicateRowsTest(ImportCase):
+    """Повторяющаяся строка внутри одного файла (PERF-3, побочная выгода)."""
+
+    def test_duplicate_key_updates_instead_of_breaking_the_import(self):
+        """Прежде вторая такая строка роняла импорт файла по уникальному ключу."""
+        rows = [
+            indicator_row("965", "Самолето-километры", "100"),
+            indicator_row("965", "Самолето-километры", "150"),
+        ]
+
+        result = self.do_import(rows)
+
+        self.assertTrue(result["success"], result.get("message"))
+        with self.Session() as session:
+            row = session.query(AirlineIndicators).one()
+            self.assertEqual(150.0, float(row.value))
 
 
 class LockedOnce:
