@@ -16,7 +16,13 @@ class User(Base):
     username: Mapped[str] = mapped_column(String(50), unique=True)
     email: Mapped[str] = mapped_column(String(25), unique=True)
     position: Mapped[UserPosition]
+    # Хеш scrypt в формате utils.passwords, а не сам пароль (SEC-1).
     password_hash: Mapped[str]
+    # Учётки, чей открытый пароль перевела в хеш миграция, обязаны сменить его при
+    # первом входе: прежнее значение известно всем, у кого есть клон репозитория (SEC-5).
+    must_change_password: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default='0'
+    )
 
 class Airport(Base):
     __tablename__ = 'airports'
