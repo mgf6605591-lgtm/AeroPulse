@@ -6,7 +6,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship, declarative_base
 from sqlalchemy import Boolean, ForeignKey, Index, Integer, String
 from datetime import datetime
 from db.models.enums import RouteType, UserPosition, ShippingRegularity, Months
-from db.models.types import ExactDecimal
+from db.models.types import ExactDecimal, MonthNumber
 
 Base = declarative_base()
 
@@ -103,7 +103,7 @@ class AirlineIndicators(Base):
     indicator: Mapped["Indicator"] = relationship("Indicator")
     shipping_id: Mapped[int] = mapped_column(ForeignKey('shipping.id', ondelete='CASCADE'))
     shipping: Mapped["Shipping"] = relationship("Shipping", back_populates="indicators")
-    month: Mapped[Months]
+    month: Mapped[Months] = mapped_column(MonthNumber)
     year: Mapped[int] = mapped_column(Integer, default=2025)
     value: Mapped[Decimal] = mapped_column(ExactDecimal)
 
@@ -138,6 +138,6 @@ class AirportIndicators(Base):
     indicator: Mapped["Indicator"] = relationship("Indicator")
     airport_id: Mapped[int] = mapped_column(ForeignKey('airports.id', ondelete='RESTRICT'))
     airport: Mapped["Airport"] = relationship("Airport", back_populates="indicators")
-    month: Mapped[Months]
+    month: Mapped[Months] = mapped_column(MonthNumber)
     year: Mapped[int] = mapped_column(Integer, default=2025)
     value: Mapped[Decimal] = mapped_column(ExactDecimal)

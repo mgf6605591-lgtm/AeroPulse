@@ -1,14 +1,8 @@
 from typing import List, Dict
+from controllers.period_filter import apply_period_filter
 from db.models.entities import AirlineIndicators, Shipping, Airline, Indicator, Route
-from sqlalchemy import select, and_
+from sqlalchemy import select
 from sqlalchemy.orm import joinedload
-
-
-MONTH_INDEX = {
-    'January': 1, 'February': 2, 'March': 3, 'April': 4,
-    'May': 5, 'June': 6, 'July': 7, 'August': 8,
-    'September': 9, 'October': 10, 'November': 11, 'December': 12,
-}
 
 
 class AirlineIndController:
@@ -54,34 +48,12 @@ class AirlineIndController:
         elif filters.get("indicator_id"):
             query = query.filter(AirlineIndicators.indicator_id == int(filters["indicator_id"]))
 
-        # Диапазон периода: ограничиваем SQL по годам, точную фильтрацию по месяцу — в Python
-        if filters.get('period_from') and filters.get('period_to'):
-            yf, _ = filters['period_from']
-            yt, _ = filters['period_to']
-            query = query.filter(
-                and_(AirlineIndicators.year >= yf, AirlineIndicators.year <= yt)
-            )
+        query = apply_period_filter(query, AirlineIndicators, filters)
 
         if route_types:
             query = query.join(Shipping.route).filter(Route.type.in_(list(route_types)))
         elif route_type_single:
             query = query.join(Shipping.route).filter(Route.type == route_type_single)
 
-        result = session.execute(query).unique().scalars().all()
-
-        if filters.get('period_from') and filters.get('period_to'):
-            yf, mf = filters['period_from']
-            yt, mt = filters['period_to']
-            start = yf * 100 + mf
-            end = yt * 100 + mt
-            filtered = []
-            for rec in result:
-                m = rec.month.name if hasattr(rec.month, 'name') else str(rec.month)
-                m_idx = MONTH_INDEX.get(m, 1)
-                key = rec.year * 100 + m_idx
-                if start <= key <= end:
-                    filtered.append(rec)
-            return filtered
-
-        return result
+        return session.execute(query).unique().scalars().all()
 

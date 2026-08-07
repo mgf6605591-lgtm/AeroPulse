@@ -10,8 +10,49 @@ SQLite не хранит десятичные числа: у типа `DECIMAL` 
 from decimal import Decimal
 from typing import Optional
 
-from sqlalchemy import String
+from sqlalchemy import Integer, String
 from sqlalchemy.types import TypeDecorator
+
+from db.models.enums import Months
+
+# Номер месяца — порядок объявления в перечислении: январь первый.
+_MONTH_TO_NUMBER = {month: number for number, month in enumerate(Months, start=1)}
+_NUMBER_TO_MONTH = {number: month for month, number in _MONTH_TO_NUMBER.items()}
+
+
+class MonthNumber(TypeDecorator):
+    """Месяц: в базе — число 1…12, в Python — член `Months`.
+
+    Месяц хранился именем («January»), а имена несравнимы по порядку: SQL мог
+    ограничить выборку только по годам, и отбор по месяцу делался перебором уже
+    поднятых записей (PERF-1). Номер упорядочен, поэтому весь период уходит в
+    запрос одним условием.
+
+    Прикладной код при этом не меняется: он получает и передаёт `Months`.
+    """
+
+    impl = Integer
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect) -> Optional[int]:
+        if value is None:
+            return None
+        if isinstance(value, Months):
+            return _MONTH_TO_NUMBER[value]
+        if isinstance(value, str):
+            # Имя месяца — как в прежнем хранении и в данных, приходящих из парсеров.
+            return _MONTH_TO_NUMBER[Months[value]]
+        number = int(value)
+        if number not in _NUMBER_TO_MONTH:
+            raise ValueError(f"Номер месяца вне диапазона 1…12: {value!r}")
+        return number
+
+    def process_result_value(self, value, dialect) -> Optional[Months]:
+        if value is None:
+            return None
+        if isinstance(value, Months):
+            return value
+        return _NUMBER_TO_MONTH[int(value)]
 
 
 class ExactDecimal(TypeDecorator):
