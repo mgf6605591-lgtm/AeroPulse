@@ -32,9 +32,11 @@ class DataTableWidget(QWidget):
         
         self.radio_pivot = QRadioButton("Сводный (pivot)")
         self.radio_pivot.setChecked(True)
-        self.radio_pivot.toggled.connect(self._on_view_toggle)
-        
+
         self.radio_detail = QRadioButton("Подробный (с удалением)")
+        # Сигнал подключён только к одной кнопке: `toggled` испускается и у
+        # включаемой, и у выключаемой, поэтому подписка на обе давала два вызова
+        # на один клик — и две полных перезагрузки отчёта (BUG-24).
         self.radio_detail.toggled.connect(self._on_view_toggle)
         
         self.delete_btn = QPushButton("Удалить выбранное")

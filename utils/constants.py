@@ -70,6 +70,12 @@ GA12_DETAIL_TON_PARENT = dict(GA12_DETAIL_PARENT_BY_CODE)
 # Родительские строки «Выполненный тоннокилометраж» (связь в indicators.parent_id)
 GA12_TON_PARENT_CODES = frozenset(GA12_DETAIL_PARENT_BY_CODE.values())
 
+# Подпись кнопки «Применить». Период задаётся четырьмя комбобоксами и
+# применяется по кнопке (PERF-4), поэтому кнопка обязана показывать, что
+# показанный отчёт уже не соответствует выбранному периоду.
+APPLY_CAPTION = "Применить"
+APPLY_CAPTION_PENDING = "Применить (период изменён)"
+
 MODE_AIRLINE = 1
 MODE_AIRPORT = 2
 VIEW_PIVOT = 'pivot'

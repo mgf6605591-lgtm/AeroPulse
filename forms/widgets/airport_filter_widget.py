@@ -12,7 +12,7 @@ from PyQt6.QtCore import pyqtSignal
 
 from controllers.filter_controller import FilterController
 from forms.widgets.multi_select_filter_button import MultiSelectFilterButton
-from utils.constants import MONTHS_RU, MODE_AIRPORT
+from utils.constants import APPLY_CAPTION, APPLY_CAPTION_PENDING, MONTHS_RU, MODE_AIRPORT
 
 
 class AirportFilterWidget(QGroupBox):
@@ -24,6 +24,7 @@ class AirportFilterWidget(QGroupBox):
     def __init__(self, parent=None):
         super().__init__("Фильтры (форма 15-ГА)", parent)
         self.filter_controller = FilterController()
+        self._period_pending = False
         self._init_ui()
         self._load_lists()
 
@@ -39,8 +40,8 @@ class AirportFilterWidget(QGroupBox):
         self.indicator_btn.setMinimumWidth(200)
         self.indicator_btn.selectionChanged.connect(self._on_filters_changed)
 
-        self.apply_btn = QPushButton("Применить")
-        self.apply_btn.clicked.connect(self.filters_changed.emit)
+        self.apply_btn = QPushButton(APPLY_CAPTION)
+        self.apply_btn.clicked.connect(self._on_apply)
         self.reset_btn = QPushButton("Сбросить")
         self.reset_btn.clicked.connect(self.reset_requested.emit)
 
@@ -63,8 +64,11 @@ class AirportFilterWidget(QGroupBox):
         for combo in (self.from_year, self.to_year):
             for y in range(2020, 2030):
                 combo.addItem(str(y), y)
-        for combo in (self.from_month, self.from_year, self.to_month, self.to_year):
-            combo.currentIndexChanged.connect(self._on_filters_changed)
+        # Период применяется по кнопке: каждое движение любого из четырёх
+        # комбобоксов перестраивало весь отчёт, включая промежуточные состояния
+        # вроде «с декабря 2025 по январь 2024» (PERF-4).
+        for combo in self._period_combos():
+            combo.currentIndexChanged.connect(self._on_period_changed)
 
         row_period.addWidget(QLabel("Период с:"))
         row_period.addWidget(self.from_month)
@@ -113,10 +117,18 @@ class AirportFilterWidget(QGroupBox):
         # Умолчание — последний год с данными, а не весь их диапазон: раздельные
         # колонки по годам (DATA-1) иначе дали бы 24+ колонки при открытии.
         _, max_year, _, _ = self.filter_controller.get_period_range()
-        self._set_combo_value(self.from_year, max_year)
-        self._set_combo_value(self.to_year, max_year)
-        self._set_combo_value(self.from_month, "January")
-        self._set_combo_value(self.to_month, "December")
+        # Значения ставит программа: отметка «не применено» тут была бы неправдой.
+        for combo in self._period_combos():
+            combo.blockSignals(True)
+        try:
+            self._set_combo_value(self.from_year, max_year)
+            self._set_combo_value(self.to_year, max_year)
+            self._set_combo_value(self.from_month, "January")
+            self._set_combo_value(self.to_month, "December")
+        finally:
+            for combo in self._period_combos():
+                combo.blockSignals(False)
+        self._clear_pending()
 
     def _set_combo_value(self, combo: QComboBox, value):
         for i in range(combo.count()):
@@ -124,8 +136,24 @@ class AirportFilterWidget(QGroupBox):
                 combo.setCurrentIndex(i)
                 return
 
+    def _period_combos(self):
+        return (self.from_month, self.from_year, self.to_month, self.to_year)
+
     def _on_filters_changed(self):
         self.filters_changed.emit()
+
+    def _on_period_changed(self):
+        """Период изменён, но не применён: кнопка показывает, что отчёт устарел."""
+        self._period_pending = True
+        self.apply_btn.setText(APPLY_CAPTION_PENDING)
+
+    def _on_apply(self):
+        self._clear_pending()
+        self.filters_changed.emit()
+
+    def _clear_pending(self):
+        self._period_pending = False
+        self.apply_btn.setText(APPLY_CAPTION)
 
     def get_airport_id(self):
         return self.airport_combo.currentData()
@@ -149,12 +177,7 @@ class AirportFilterWidget(QGroupBox):
         self.airport_combo.setCurrentIndex(0)
         self.indicator_btn.clear_selection()
         # Сброс возвращает то же умолчание, что и первое открытие.
-        _, max_year, _, _ = self.filter_controller.get_period_range()
-        self._set_combo_value(self.from_year, max_year)
-        self._set_combo_value(self.to_year, max_year)
-        self._set_combo_value(self.from_month, "January")
-        self._set_combo_value(self.to_month, "December")
-
+        self._set_default_period()
 
     def reload_reference_lists(self):
         """Перечитать справочники, сохранив выбор аэропорта, показателей и период.
