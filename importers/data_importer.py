@@ -288,26 +288,32 @@ class DataImporter:
 
             return cls._import_result(total_imported, total_updated)
 
-        except IntegrityError as e:
-            session.rollback()
-            return {
-                'success': False,
-                'message': f'Ошибка целостности данных: {str(e)}'
-            }
-        except OperationalError as e:
-            session.rollback()
-            if "database is locked" in str(e):
-                raise
-            return {
-                'success': False,
-                'message': f'Ошибка базы данных: {str(e)}'
-            }
         except Exception as e:
-            session.rollback()
-            return {
-                'success': False,
-                'message': f'Неожиданная ошибка: {str(e)}'
-            }
+            return cls._failure(session, e, "авиакомпании")
+
+    @classmethod
+    def _failure(cls, session, error: Exception, whose: str) -> dict:
+        """Разбор ошибки импорта — общий для обеих веток.
+
+        Блокировка базы пробрасывается наверх: там её ждёт `_retry_import` с тремя
+        попытками и нарастающей паузой. Ветка аэропортов ловила всё подряд общим
+        `except Exception`, поэтому механизм повтора, написанный ради устойчивости
+        SQLite к блокировкам, для формы 15-ГА не срабатывал ни разу (BUG-23).
+        """
+        session.rollback()
+
+        if isinstance(error, OperationalError):
+            if "database is locked" in str(error):
+                raise error
+            return {'success': False, 'message': f'Ошибка базы данных: {error}'}
+
+        if isinstance(error, IntegrityError):
+            return {'success': False, 'message': f'Ошибка целостности данных: {error}'}
+
+        return {
+            'success': False,
+            'message': f'Неожиданная ошибка при импорте данных {whose}: {error}',
+        }
 
     @classmethod
     def _import_airport_data(cls, session, data: dict) -> dict:
@@ -388,11 +394,7 @@ class DataImporter:
             return cls._import_result(total_imported, total_updated)
 
         except Exception as e:
-            session.rollback()
-            return {
-                'success': False,
-                'message': f'Ошибка при импорте данных аэропорта: {str(e)}'
-            }
+            return cls._failure(session, e, "аэропорта")
 
     @staticmethod
     def _resolve_period(data: dict):
