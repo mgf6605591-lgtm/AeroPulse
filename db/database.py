@@ -1,17 +1,11 @@
 from pathlib import Path
 
-from sqlalchemy import create_engine, event, select
+from sqlalchemy import create_engine, event
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool
 from contextlib import contextmanager
 
-from db.models.entities import User
-from db.models.enums import UserPosition
 from utils.paths import get_app_dir, is_frozen
-
-DEFAULT_ADMIN_USERNAME = "admin"
-DEFAULT_ADMIN_PASSWORD = "123"
-DEFAULT_ADMIN_EMAIL = "admin@localhost"
 
 
 def _resolve_db_path() -> Path:
@@ -52,8 +46,6 @@ def _sqlite_pragmas(dbapi_conn, _connection_record):
     finally:
         cursor.close()
 
-Session = sessionmaker(engine)
-
 
 @contextmanager
 def get_session():
@@ -66,32 +58,15 @@ def get_session():
 
 
 def init_db():
-    """Схема приводится к актуальной версии миграциями — правки только через Alembic."""
+    """Схема приводится к актуальной версии миграциями — правки только через Alembic.
+
+    Учётная запись здесь больше не заводится (SEC-2). Прежний `_seed_default_admin()`
+    создавал `admin` с паролем `123` при каждом запуске: удалить такую учётку через
+    интерфейс было невозможно — на следующем старте она появлялась снова, а пароль
+    к ней знал любой, у кого есть исходники или собранный exe. Первого администратора
+    заводит пользователь в окне первичной настройки (`forms.widgets.account_dialogs`).
+    """
     # Локальный импорт: env.py миграций импортирует этот модуль.
     from db.migrator import upgrade_to_head
 
     upgrade_to_head(engine)
-    _seed_default_admin()
-
-
-def _seed_default_admin() -> None:
-    """Создаёт учётную запись администратора, если в БД ещё нет пользователя admin."""
-    session = Session()
-    try:
-        exists = session.execute(
-            select(User.id).where(User.username == DEFAULT_ADMIN_USERNAME).limit(1)
-        ).first()
-        if exists is not None:
-            return
-
-        session.add(
-            User(
-                username=DEFAULT_ADMIN_USERNAME,
-                email=DEFAULT_ADMIN_EMAIL,
-                position=UserPosition.admin,
-                password_hash=DEFAULT_ADMIN_PASSWORD,
-            )
-        )
-        session.commit()
-    finally:
-        session.close()
