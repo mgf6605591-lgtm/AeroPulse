@@ -3,7 +3,7 @@ from typing import List, Optional
 
 from sqlalchemy.orm import DeclarativeBase
 from sqlalchemy.orm import Mapped, mapped_column, relationship, declarative_base
-from sqlalchemy import Boolean, ForeignKey, Index, Integer, String
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String
 from datetime import datetime
 from db.models.enums import RouteType, UserPosition, ShippingRegularity, Months
 from db.models.types import ExactDecimal, MonthNumber
@@ -141,3 +141,38 @@ class AirportIndicators(Base):
     month: Mapped[Months] = mapped_column(MonthNumber)
     year: Mapped[int] = mapped_column(Integer, default=2025)
     value: Mapped[Decimal] = mapped_column(ExactDecimal)
+
+
+class ImportLog(Base):
+    """Журнал загрузок и удалений (FUNC-5).
+
+    О происхождении данных не сохранялось ничего: имя файла упоминалось только в
+    сообщении на экране. При расхождении цифр нельзя было установить, из какого
+    файла пришло значение и не затёр ли его повторный импорт.
+
+    Строка журнала не ссылается на предприятие внешним ключом: журнал должен
+    пережить удаление того, о чём он рассказывает, — иначе он перестаёт быть
+    журналом. По той же причине здесь хранится название, а не только id.
+    """
+
+    __tablename__ = 'import_log'
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    # 'import' — загрузка файла, 'delete' — удаление записей пользователем,
+    # 'replace' — строки периода, исчезнувшие из исправленного отчёта (DATA-5).
+    kind: Mapped[str] = mapped_column(String(20))
+    user: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+
+    source_file: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    entity_type: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    entity_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    entity_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+
+    month: Mapped[Optional[Months]] = mapped_column(MonthNumber, nullable=True)
+    year: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+    imported: Mapped[int] = mapped_column(Integer, default=0)
+    updated: Mapped[int] = mapped_column(Integer, default=0)
+    removed: Mapped[int] = mapped_column(Integer, default=0)
+    message: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
