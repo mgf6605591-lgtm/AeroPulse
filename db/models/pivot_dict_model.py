@@ -1,5 +1,7 @@
 from typing import List, Dict, Any, Optional
 from PyQt6.QtCore import QAbstractTableModel, Qt, QModelIndex
+
+from db.models.roles import RAW_VALUE_ROLE
 from decimal import Decimal
 
 
@@ -35,6 +37,10 @@ class PivotDictModel(QAbstractTableModel):
         key = self._keys[c]
         val = row.get(key)
 
+        if role == RAW_VALUE_ROLE:
+            # Значение без форматирования — для выгрузки в XLSX (FUNC-2).
+            return val
+
         if role == Qt.ItemDataRole.DisplayRole:
             if val is None or val == "":
                 return ""
@@ -44,7 +50,10 @@ class PivotDictModel(QAbstractTableModel):
                 # Целочисленное отображение для целых
                 if isinstance(val, float) and val == int(val):
                     return f"{int(val):,}".replace(",", " ")
-                return f"{val:,.2f}".replace(",", " ")
+                # Русская запись: пробел разделяет разряды, запятая — дробную часть.
+                # Разделитель разрядов заменялся и раньше, а дробный оставался
+                # точкой, из-за чего отчёт на русском показывал «1 234.57» (BUG-27).
+                return f"{val:,.2f}".replace(",", " ").replace(".", ",")
             return str(val)
 
         elif role == Qt.ItemDataRole.TextAlignmentRole:

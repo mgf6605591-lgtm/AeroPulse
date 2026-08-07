@@ -3,6 +3,8 @@ from PyQt6.QtCore import QAbstractTableModel, Qt, QModelIndex
 from PyQt6.QtGui import QColor
 from decimal import Decimal
 
+from db.models.roles import RAW_VALUE_ROLE
+
 
 class SQLAlchemyTableModel(QAbstractTableModel):
     """
@@ -49,6 +51,16 @@ class SQLAlchemyTableModel(QAbstractTableModel):
             return None
 
         obj = self._data[row]
+
+        if role == RAW_VALUE_ROLE:
+            # Значение без приведения к строке — для выгрузки в XLSX (FUNC-2).
+            # Числа уходят числами, у перечислений берётся подпись.
+            if self._column_attrs and col < len(self._column_attrs):
+                value = self._get_nested_attribute(obj, self._column_attrs[col])
+                if hasattr(value, 'value'):
+                    return value.value
+                return value
+            return str(obj)
 
         if role == Qt.ItemDataRole.DisplayRole:
             if self._column_attrs and col < len(self._column_attrs):
