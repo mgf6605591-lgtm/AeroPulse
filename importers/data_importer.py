@@ -113,6 +113,17 @@ class DataImporter:
         приоритета операторов в подстановке кода (BUG-1).
         """
         indicators_map = {}
+
+        # Справочник показателей читается один раз: прежде на каждую строку файла
+        # уходило по одному-двум отдельным запросам (PERF-3).
+        by_code = {}
+        by_name = {}
+        for row in session.query(Indicator).all():
+            if row.code:
+                by_code.setdefault(row.code, row)
+            if row.name:
+                by_name.setdefault(row.name, row)
+
         for indicator_data in data.get('indicators', []):
             code = indicator_data.get('indicator_code') or indicator_data.get('code')
             name = indicator_data.get('indicator_name') or indicator_data.get('name')
@@ -121,11 +132,7 @@ class DataImporter:
             if not code and not name:
                 continue
 
-            indicator = None
-            if code:
-                indicator = session.query(Indicator).filter(
-                    Indicator.code == code
-                ).first()
+            indicator = by_code.get(code) if code else None
 
             # Поиск по названию — только когда кода нет вовсе. Названия строк в
             # бланке повторяются: «Самолето-километры» стоит и в регулярных
@@ -134,9 +141,7 @@ class DataImporter:
             # уже созданный показатель 965, сама в справочнике не заводилась, а её
             # значения уходили под чужой код (DATA-8).
             if not indicator and not code and name:
-                indicator = session.query(Indicator).filter(
-                    Indicator.name == name
-                ).first()
+                indicator = by_name.get(name)
 
             if not indicator:
                 # Скобки обязательны: `code or name[:10] if name else 'UNK'` Python
@@ -150,6 +155,10 @@ class DataImporter:
                 )
                 session.add(indicator)
                 session.flush()
+                # Созданный показатель попадает в те же словари: следующая строка
+                # файла с тем же кодом должна найти его, а не завести второй.
+                by_code.setdefault(indicator.code, indicator)
+                by_name.setdefault(indicator.name, indicator)
 
             indicators_map[(code, name)] = indicator
 
@@ -191,82 +200,55 @@ class DataImporter:
 
             total_imported = 0
             total_updated = 0
-            
+
+            # Справочники читаются один раз до цикла: рейсов и видов маршрута в
+            # пределах файла считанные единицы, а поиск шёл на каждую строку
+            # отдельным запросом (PERF-3).
+            routes = cls._route_index(session)
+            shippings = cls._shipping_index(session, airline.id)
+            existing_rows = cls._existing_airline_rows(session, airline.id, month_enum, year)
+
             for indicator_data in data.get('indicators', []):
                 code = indicator_data.get('indicator_code') or indicator_data.get('code')
                 name = indicator_data.get('indicator_name') or indicator_data.get('name')
-                
+
                 indicator = indicators_map.get((code, name))
                 if not indicator:
                     continue
-                
-                # Получаем или создаем маршрут (Shipping)
-                route_type_str = indicator_data.get('route_type', 'local')
-                regularity_str = indicator_data.get('regularity', 'regular')
-                
-                # Преобразуем в enum
-                route_type = None
-                for rt in RouteType:
-                    if rt.name == route_type_str or rt.value == route_type_str:
-                        route_type = rt
-                        break
-                if not route_type:
-                    route_type = RouteType.local
-                
-                regularity = None
-                for reg in ShippingRegularity:
-                    if reg.name == regularity_str or reg.value == regularity_str:
-                        regularity = reg
-                        break
-                if not regularity:
-                    regularity = ShippingRegularity.regular
-                
-                # Ищем существующий маршрут (Shipping)
-                # Используем связь с таблицей Route через route_id
-                # Сначала ищем или создаем Route
-                route = session.query(Route).filter(
-                    Route.type == route_type,
-                    Route.regularity == regularity
-                ).first()
-                
-                if not route:
-                    route = Route(
-                        type=route_type,
-                        regularity=regularity
-                    )
+
+                route_type = cls._as_enum(
+                    RouteType, indicator_data.get('route_type'), RouteType.local
+                )
+                regularity = cls._as_enum(
+                    ShippingRegularity, indicator_data.get('regularity'), ShippingRegularity.regular
+                )
+
+                route = routes.get((route_type, regularity))
+                if route is None:
+                    route = Route(type=route_type, regularity=regularity)
                     session.add(route)
                     session.flush()
-                
-                # Ищем Shipping по airline_id и route_id
-                shipping = session.query(Shipping).filter(
-                    Shipping.airline_id == airline.id,
-                    Shipping.route_id == route.id
-                ).first()
-                
-                if not shipping:
-                    shipping = Shipping(
-                        airline_id=airline.id,
-                        route_id=route.id
-                    )
+                    routes[(route_type, regularity)] = route
+
+                shipping = shippings.get(route.id)
+                if shipping is None:
+                    shipping = Shipping(airline_id=airline.id, route_id=route.id)
                     session.add(shipping)
                     session.flush()
-                
-                # Получаем значение
+                    shippings[route.id] = shipping
+
                 value = indicator_data.get('value')
                 if value is None:
                     continue
-                
+
                 value = _exact_decimal(value)
-                
-                # Проверяем существующую запись
-                existing = session.query(AirlineIndicators).filter(
-                    AirlineIndicators.indicator_id == indicator.id,
-                    AirlineIndicators.shipping_id == shipping.id,
-                    AirlineIndicators.month == month_enum,
-                    AirlineIndicators.year == year
-                ).first()
-                
-                if existing:
+
+                key = (indicator.id, shipping.id)
+                existing = existing_rows.get(key)
+                if existing is not None:
+                    # Тот же ключ второй раз в одном файле обновляет запись, а не
+                    # добавляет вторую: прежде дубль внутри присланного файла ронял
+                    # импорт целиком по уникальному ключу.
                     existing.value = value
                     total_updated += 1
                 else:
@@ -278,18 +260,65 @@ class DataImporter:
                         value=value
                     )
                     session.add(airline_ind)
+                    existing_rows[key] = airline_ind
                     total_imported += 1
-                
-                # Периодически сбрасываем транзакцию для предотвращения блокировок
-                if (total_imported + total_updated) % 50 == 0:
-                    session.flush()
-            
+
             session.commit()
 
             return cls._import_result(total_imported, total_updated)
 
         except Exception as e:
             return cls._failure(session, e, "авиакомпании")
+
+    @staticmethod
+    def _as_enum(enum_cls, raw, default):
+        """Член перечисления по имени или подписи; при неизвестном значении — умолчание."""
+        if isinstance(raw, enum_cls):
+            return raw
+        for member in enum_cls:
+            if member.name == raw or member.value == raw:
+                return member
+        return default
+
+    @staticmethod
+    def _route_index(session) -> dict:
+        """Виды рейса по паре (тип маршрута, регулярность) — одним запросом."""
+        return {(route.type, route.regularity): route for route in session.query(Route).all()}
+
+    @staticmethod
+    def _shipping_index(session, airline_id: int) -> dict:
+        """Рейсы предприятия по `route_id` — одним запросом."""
+        rows = session.query(Shipping).filter(Shipping.airline_id == airline_id).all()
+        return {shipping.route_id: shipping for shipping in rows}
+
+    @staticmethod
+    def _existing_airline_rows(session, airline_id: int, month_enum, year: int) -> dict:
+        """Строки отчётности предприятия за период — одним запросом вместо одного на строку."""
+        rows = (
+            session.query(AirlineIndicators)
+            .join(Shipping, AirlineIndicators.shipping_id == Shipping.id)
+            .filter(
+                Shipping.airline_id == airline_id,
+                AirlineIndicators.month == month_enum,
+                AirlineIndicators.year == year,
+            )
+            .all()
+        )
+        return {(row.indicator_id, row.shipping_id): row for row in rows}
+
+    @staticmethod
+    def _existing_airport_rows(session, airport_id: int, month_enum, year: int) -> dict:
+        """То же для аэропортов: рейсов в 15-ГА нет, ключ — только показатель."""
+        rows = (
+            session.query(AirportIndicators)
+            .filter(
+                AirportIndicators.airport_id == airport_id,
+                AirportIndicators.month == month_enum,
+                AirportIndicators.year == year,
+            )
+            .all()
+        )
+        return {row.indicator_id: row for row in rows}
 
     @classmethod
     def _failure(cls, session, error: Exception, whose: str) -> dict:
@@ -350,29 +379,26 @@ class DataImporter:
 
             total_imported = 0
             total_updated = 0
-            
+
+            # Строки периода читаются одним запросом, а не по одному на показатель.
+            existing_rows = cls._existing_airport_rows(session, airport.id, month_enum, year)
+
             for indicator_data in data.get('indicators', []):
                 code = indicator_data.get('indicator_code') or indicator_data.get('code')
                 name = indicator_data.get('indicator_name') or indicator_data.get('name')
-                
+
                 indicator = indicators_map.get((code, name))
                 if not indicator:
                     continue
-                
+
                 value = indicator_data.get('value')
                 if value is None:
                     continue
                 
                 value = _exact_decimal(value)
-                
-                existing = session.query(AirportIndicators).filter(
-                    AirportIndicators.indicator_id == indicator.id,
-                    AirportIndicators.airport_id == airport.id,
-                    AirportIndicators.month == month_enum,
-                    AirportIndicators.year == year
-                ).first()
-                
-                if existing:
+
+                existing = existing_rows.get(indicator.id)
+                if existing is not None:
                     existing.value = value
                     total_updated += 1
                 else:
@@ -384,11 +410,9 @@ class DataImporter:
                         value=value
                     )
                     session.add(airport_ind)
+                    existing_rows[indicator.id] = airport_ind
                     total_imported += 1
-                
-                if (total_imported + total_updated) % 50 == 0:
-                    session.flush()
-            
+
             session.commit()
 
             return cls._import_result(total_imported, total_updated)
