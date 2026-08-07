@@ -6,14 +6,15 @@
 
 Ошибка записи в журнал не отменяет операцию и не показывается пользователю:
 журнал важен, но не важнее того, ради чего пользователь пришёл. Зато и молча она
-не теряется — сообщение уходит в тот же вывод, что и остальные (INFRA-2 ещё
-открыт: файлового журнала у приложения пока нет).
+не теряется — уходит в файловый журнал приложения.
 """
-import traceback
+import logging
 from typing import Optional
 
 from db.database import get_session
 from db.models.entities import ImportLog
+
+log = logging.getLogger(__name__)
 
 KIND_IMPORT = "import"
 KIND_DELETE = "delete"
@@ -47,8 +48,7 @@ def record_safely(session, **fields) -> None:
     try:
         record(session, **fields)
     except Exception:
-        print("Не удалось записать строку журнала:")
-        traceback.print_exc()
+        log.exception("Не удалось записать строку журнала")
 
 
 def record_deletion(*, count: int, entity_type: Optional[str] = None,
@@ -60,8 +60,7 @@ def record_deletion(*, count: int, entity_type: Optional[str] = None,
                    removed=count, message=message, user=user)
             session.commit()
     except Exception:
-        print("Не удалось записать удаление в журнал:")
-        traceback.print_exc()
+        log.exception("Не удалось записать удаление в журнал")
 
 
 def _file_name(path: Optional[str]) -> Optional[str]:

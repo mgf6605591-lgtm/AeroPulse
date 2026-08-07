@@ -18,6 +18,7 @@ Revises: 9d180a1255ac
 Create Date: 2026-08-06 20:24:11.038217
 
 """
+import logging
 from typing import Sequence, Union
 
 from alembic import op
@@ -157,7 +158,12 @@ def _collapse_duplicates() -> None:
         'airportInd': airport_ind,
     }
     if any(removed.values()):
-        print(f"Миграция {revision}: удалены дубликаты — {removed}")
+        # Это отчёт об изменении пользовательских данных, а не диагностика:
+        # операция необратима и однократна, а в собранном окне stdout нет —
+        # сообщение о ней не должно теряться (INFRA-2).
+        logging.getLogger(__name__).warning(
+            "Миграция %s: удалены дубликаты — %s", revision, removed
+        )
 
 
 def upgrade() -> None:

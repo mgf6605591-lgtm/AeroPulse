@@ -11,7 +11,7 @@ from utils.qt_plugins import ensure_qt_platform_plugins
 
 ensure_qt_platform_plugins()
 
-import traceback
+import logging
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QTabWidget,
     QPushButton, QFileDialog, QMessageBox, QApplication
@@ -31,6 +31,8 @@ from forms.widgets.import_dialog import ImportDialog
 from forms.widgets.period_dialog import PeriodDialog
 from forms.widgets.reference_dialog import ReferenceDialog
 from utils.constants import MONTHS_RU, MODE_AIRLINE, MODE_AIRPORT
+
+log = logging.getLogger(__name__)
 
 
 class MainWindow(QMainWindow):
@@ -186,7 +188,7 @@ class MainWindow(QMainWindow):
         try:
             import_backup = make_backup(db_path(), reason="import")
         except Exception:
-            traceback.print_exc()
+            log.exception("Не удалось снять копию базы")
 
         try:
             QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
@@ -240,8 +242,8 @@ class MainWindow(QMainWindow):
 
         except Exception as e:
             QApplication.restoreOverrideCursor()
+            log.exception("Импорт не выполнен")
             QMessageBox.critical(self, "Ошибка импорта", str(e))
-            traceback.print_exc()
 
     def open_references(self):
         """Окно ведения справочников.
@@ -331,7 +333,7 @@ class MainWindow(QMainWindow):
         try:
             backup_path = make_backup(db_path(), reason="delete")
         except Exception:
-            traceback.print_exc()
+            log.exception("Не удалось снять копию базы")
 
         deleted = 0
         try:
@@ -362,8 +364,8 @@ class MainWindow(QMainWindow):
             self._load_initial_data()
 
         except Exception as e:
+            log.exception("Не удалось удалить записи")
             QMessageBox.critical(self, "Ошибка", f"Ошибка удаления: {e}")
-            traceback.print_exc()
 
     def logout_action(self):
         """Выход из системы"""

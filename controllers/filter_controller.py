@@ -1,10 +1,13 @@
 # controllers/filter_controller.py
+import logging
 from typing import Dict, Optional, Tuple, Any
 from sqlalchemy import func
 from controllers.reference_cache import ReferenceDataCache, reference_cache
 from db.database import get_session
 from db.models.entities import Airline, Airport, Indicator, AirlineIndicators, AirportIndicators
 from utils.constants import MONTHS_LIST, MODE_AIRLINE, MODE_AIRPORT
+
+log = logging.getLogger(__name__)
 
 
 class FilterController:
@@ -58,8 +61,8 @@ class FilterController:
                         result.append((eid, e.name.strip()))
                 self._cache.put_entities(mode, result)
                 return result
-        except Exception as e:
-            print(f"Ошибка загрузки сущностей: {e}")
+        except Exception:
+            log.exception("Не удалось загрузить список предприятий")
             return [(None, "Все")]
 
     def load_indicators(self) -> list:
@@ -81,8 +84,8 @@ class FilterController:
                     result.append((iid, i.name.strip()))
                 self._cache.put_indicators(result)
                 return result
-        except Exception as e:
-            print(f"Ошибка загрузки показателей: {e}")
+        except Exception:
+            log.exception("Не удалось загрузить список показателей")
             return [(None, "Все показатели")]
 
     def get_period_range(self) -> Tuple[int, int, int, int]:
