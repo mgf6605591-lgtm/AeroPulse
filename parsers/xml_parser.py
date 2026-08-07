@@ -162,14 +162,14 @@ class XMLParser(BaseParser):
                     s += v4
                 if v5 is not None:
                     s += v5
-                entries.append(("trunk", float(s)))
+                entries.append(("trunk", s))
 
             if v6 is not None:
-                entries.append(("local", float(v6)))
+                entries.append(("local", v6))
             if v7 is not None:
-                entries.append(("interregional", float(v7)))
+                entries.append(("interregional", v7))
             if v8 is not None:
-                entries.append(("subsidir", float(v8)))
+                entries.append(("subsidir", v8))
 
             for route_type, value in entries:
                 if value is None:

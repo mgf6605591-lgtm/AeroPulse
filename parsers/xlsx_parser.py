@@ -279,7 +279,7 @@ class XLSXParser(BaseParser):
                     'measure': row.measure,
                     'route_type': route_type,
                     'regularity': row.section,
-                    'value': float(value),
+                    'value': value,
                 })
 
         return indicators

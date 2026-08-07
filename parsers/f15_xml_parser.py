@@ -235,7 +235,7 @@ class F15XMLParser(BaseParser):
                         "indicator_code": icode,
                         "indicator_name": iname,
                         "measure": cls._measure_for_col(ccode),
-                        "value": float(val),
+                        "value": val,
                     }
                 )
 

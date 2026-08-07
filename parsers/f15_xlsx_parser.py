@@ -170,7 +170,7 @@ class F15XLSXParser(BaseParser):
                         "indicator_code": f"15ГА-{rc}-{tag}",
                         "indicator_name": f"{row_title} — {F15_COL_TITLES.get(ccode, ccode)}",
                         "measure": F15XMLParser._measure_for_col(ccode),
-                        "value": float(value),
+                        "value": value,
                     }
                 )
 
