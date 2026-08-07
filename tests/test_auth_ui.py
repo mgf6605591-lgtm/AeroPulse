@@ -1,0 +1,187 @@
+"""Окна входа и учётных записей (SEC-4, SEC-2).
+
+Слой Qt до сих пор не был покрыт тестами вообще. Здесь проверяется то, что нельзя
+увидеть в самих службах: свойство поля пароля в загруженной разметке и поведение
+диалогов первичной настройки и обязательной смены пароля.
+
+Окна создаются на платформе offscreen — ни одного окна на экране не появляется.
+Модальные QMessageBox подменяются: без этого отказ в диалоге остановил бы прогон.
+"""
+
+import os
+import unittest
+from unittest.mock import patch
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+from sqlalchemy import text
+from sqlalchemy.orm import sessionmaker
+
+from services.auth_service import auth_service
+from tests.support import MigratedDbCase, scalar
+from utils.passwords import is_hashed
+
+try:
+    from PyQt6.QtWidgets import QApplication, QDialog, QLineEdit
+    HAS_QT = True
+except ImportError:  # PyQt6 отсутствует — проверки Qt пропускаются
+    HAS_QT = False
+
+_app = None
+
+
+def setUpModule():
+    global _app
+    if HAS_QT:
+        _app = QApplication.instance() or QApplication([])
+
+
+@unittest.skipUnless(HAS_QT, "PyQt6 не установлен")
+class AuthWindowTest(unittest.TestCase):
+    """Разметка окна входа."""
+
+    def test_password_field_is_masked(self):
+        """SEC-4: без echoMode пароль виден на экране целиком."""
+        from forms.auth import Auth
+
+        window = Auth()
+        self.addCleanup(window.deleteLater)
+        self.assertEqual(QLineEdit.EchoMode.Password, window.password.echoMode())
+
+    def test_login_field_is_not_masked(self):
+        from forms.auth import Auth
+
+        window = Auth()
+        self.addCleanup(window.deleteLater)
+        self.assertEqual(QLineEdit.EchoMode.Normal, window.login.echoMode())
+
+
+@unittest.skipUnless(HAS_QT, "PyQt6 не установлен")
+class AccountDialogCase(MigratedDbCase):
+    """Диалоги поверх временной БД, с подменённым модальным предупреждением."""
+
+    def setUp(self):
+        super().setUp()
+        self.Session = sessionmaker(bind=self.engine, expire_on_commit=False)
+        patcher = patch("services.auth_service.get_session", self.Session)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+        warning = patch("forms.widgets.account_dialogs.QMessageBox.warning")
+        self.warning = warning.start()
+        self.addCleanup(warning.stop)
+
+
+class FirstRunDialogTest(AccountDialogCase):
+
+    def make_dialog(self, username="admin", email="admin@localhost",
+                    password="Пароль12345", confirm=None):
+        from forms.widgets.account_dialogs import FirstRunDialog
+
+        dialog = FirstRunDialog()
+        self.addCleanup(dialog.deleteLater)
+        dialog.username.setText(username)
+        dialog.email.setText(email)
+        dialog.password.setText(password)
+        dialog.confirm.setText(password if confirm is None else confirm)
+        return dialog
+
+    def test_fields_are_masked(self):
+        dialog = self.make_dialog()
+        self.assertEqual(QLineEdit.EchoMode.Password, dialog.password.echoMode())
+        self.assertEqual(QLineEdit.EchoMode.Password, dialog.confirm.echoMode())
+
+    def test_creates_administrator(self):
+        dialog = self.make_dialog()
+
+        dialog._submit()
+
+        self.assertEqual(QDialog.DialogCode.Accepted, dialog.result())
+        self.assertEqual("admin", dialog.account.username)
+        self.assertTrue(dialog.account.is_admin)
+        self.assertTrue(is_hashed(
+            scalar(self.engine, "SELECT password_hash FROM users WHERE username = 'admin'")
+        ))
+
+    def test_mismatched_confirmation_creates_nothing(self):
+        dialog = self.make_dialog(confirm="Пароль12346")
+
+        dialog._submit()
+
+        self.assertNotEqual(QDialog.DialogCode.Accepted, dialog.result())
+        self.assertEqual(0, scalar(self.engine, "SELECT count(*) FROM users"))
+        self.assertIn("не совпадают", self.warning.call_args.args[2])
+
+    def test_short_password_creates_nothing(self):
+        dialog = self.make_dialog(password="1234567")
+
+        dialog._submit()
+
+        self.assertNotEqual(QDialog.DialogCode.Accepted, dialog.result())
+        self.assertEqual(0, scalar(self.engine, "SELECT count(*) FROM users"))
+
+    def test_dialog_is_skipped_when_accounts_exist(self):
+        from forms.widgets.account_dialogs import ensure_initial_admin
+
+        auth_service.create_account("admin", "admin@localhost", "Пароль12345")
+        # Окно не создаётся вовсе: exec() модален и остановил бы прогон.
+        self.assertTrue(ensure_initial_admin())
+
+
+class PasswordChangeDialogTest(AccountDialogCase):
+
+    def setUp(self):
+        super().setUp()
+        self.account = auth_service.create_account(
+            "admin", "admin@localhost", "Пароль12345"
+        )["account"]
+        with self.Session() as session:
+            session.execute(text("UPDATE users SET must_change_password = 1"))
+            session.commit()
+
+    def make_dialog(self, password="Новый пароль123", confirm=None):
+        from forms.widgets.account_dialogs import PasswordChangeDialog
+
+        dialog = PasswordChangeDialog(self.account, forced=True)
+        self.addCleanup(dialog.deleteLater)
+        dialog.new_password.setText(password)
+        dialog.confirm.setText(password if confirm is None else confirm)
+        return dialog
+
+    def test_fields_are_masked(self):
+        dialog = self.make_dialog()
+        self.assertEqual(QLineEdit.EchoMode.Password, dialog.new_password.echoMode())
+        self.assertEqual(QLineEdit.EchoMode.Password, dialog.confirm.echoMode())
+
+    def test_saves_new_password_and_clears_the_flag(self):
+        dialog = self.make_dialog()
+
+        dialog._submit()
+
+        self.assertEqual(QDialog.DialogCode.Accepted, dialog.result())
+        self.assertFalse(dialog.account.must_change_password)
+        self.assertTrue(auth_service.sign_in("admin", "Новый пароль123")["success"])
+
+    def test_same_password_keeps_the_requirement(self):
+        dialog = self.make_dialog(password="Пароль12345")
+
+        dialog._submit()
+
+        self.assertNotEqual(QDialog.DialogCode.Accepted, dialog.result())
+        self.assertEqual(
+            1, scalar(self.engine, "SELECT must_change_password FROM users WHERE id = 1")
+        )
+
+    def test_mismatched_confirmation_keeps_the_requirement(self):
+        dialog = self.make_dialog(confirm="Другой пароль123")
+
+        dialog._submit()
+
+        self.assertNotEqual(QDialog.DialogCode.Accepted, dialog.result())
+        self.assertEqual(
+            1, scalar(self.engine, "SELECT must_change_password FROM users WHERE id = 1")
+        )
+
+
+if __name__ == "__main__":
+    unittest.main()
