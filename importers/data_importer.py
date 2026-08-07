@@ -92,42 +92,55 @@ class DataImporter:
                 detail.parent_id = parent_id
 
     @classmethod
+    def _resolve_indicators(cls, session, data: dict) -> dict:
+        """Показатели файла: найденные в справочнике либо созданные.
+
+        Блок был скопирован в обе ветки импорта дословно, вместе с ошибкой
+        приоритета операторов в подстановке кода (BUG-1).
+        """
+        indicators_map = {}
+        for indicator_data in data.get('indicators', []):
+            code = indicator_data.get('indicator_code') or indicator_data.get('code')
+            name = indicator_data.get('indicator_name') or indicator_data.get('name')
+            measure = indicator_data.get('measure', '')
+
+            if not code and not name:
+                continue
+
+            indicator = None
+            if code:
+                indicator = session.query(Indicator).filter(
+                    Indicator.code == code
+                ).first()
+
+            if not indicator and name:
+                indicator = session.query(Indicator).filter(
+                    Indicator.name == name
+                ).first()
+
+            if not indicator:
+                # Скобки обязательны: `code or name[:10] if name else 'UNK'` Python
+                # читает как `(code or name[:10]) if name else 'UNK'`, то есть при
+                # пустом имени отбрасывал код и подставлял 'UNK'. Второй такой
+                # показатель ронял импорт файла по уникальному ключу кода.
+                indicator = Indicator(
+                    code=code or (name[:10] if name else 'UNK'),
+                    name=name or code,
+                    measure=measure,
+                )
+                session.add(indicator)
+                session.flush()
+
+            indicators_map[(code, name)] = indicator
+
+        cls._link_detail_indicators(session)
+        return indicators_map
+
+    @classmethod
     def _import_airline_data(cls, session, data: dict) -> dict:
         """Импорт данных для авиакомпаний"""
         try:
-            # Получаем или создаем индикаторы
-            indicators_map = {}
-            for indicator_data in data.get('indicators', []):
-                code = indicator_data.get('indicator_code') or indicator_data.get('code')
-                name = indicator_data.get('indicator_name') or indicator_data.get('name')
-                measure = indicator_data.get('measure', '')
-                
-                if not code and not name:
-                    continue
-                
-                indicator = None
-                if code:
-                    indicator = session.query(Indicator).filter(
-                        Indicator.code == code
-                    ).first()
-                
-                if not indicator and name:
-                    indicator = session.query(Indicator).filter(
-                        Indicator.name == name
-                    ).first()
-                
-                if not indicator:
-                    indicator = Indicator(
-                        code=code or name[:10] if name else 'UNK',
-                        name=name or code,
-                        measure=measure,
-                    )
-                    session.add(indicator)
-                    session.flush()
-                
-                indicators_map[(code, name)] = indicator
-
-            cls._link_detail_indicators(session)
+            indicators_map = cls._resolve_indicators(session, data)
 
             # Получаем авиакомпанию
             airline_data = data.get('airline', {})
@@ -281,38 +294,7 @@ class DataImporter:
     def _import_airport_data(cls, session, data: dict) -> dict:
         """Импорт данных для аэропортов"""
         try:
-            indicators_map = {}
-            for indicator_data in data.get('indicators', []):
-                code = indicator_data.get('indicator_code') or indicator_data.get('code')
-                name = indicator_data.get('indicator_name') or indicator_data.get('name')
-                measure = indicator_data.get('measure', '')
-                
-                if not code and not name:
-                    continue
-                
-                indicator = None
-                if code:
-                    indicator = session.query(Indicator).filter(
-                        Indicator.code == code
-                    ).first()
-                
-                if not indicator and name:
-                    indicator = session.query(Indicator).filter(
-                        Indicator.name == name
-                    ).first()
-                
-                if not indicator:
-                    indicator = Indicator(
-                        code=code or name[:10] if name else 'UNK',
-                        name=name or code,
-                        measure=measure,
-                    )
-                    session.add(indicator)
-                    session.flush()
-                
-                indicators_map[(code, name)] = indicator
-
-            cls._link_detail_indicators(session)
+            indicators_map = cls._resolve_indicators(session, data)
 
             # Получаем аэропорт
             airport_data = data.get('airport', {})

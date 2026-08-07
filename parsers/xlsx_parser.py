@@ -7,6 +7,11 @@ from typing import Dict, List, Optional, Tuple
 import pandas as pd
 from parsers.base_parser import BaseParser
 from parsers.xlsx_common import count_markers, find_sheet, sheet_names
+from utils.ga12_layout import (
+    GA12_DETAIL_ROW_BY_MARKER,
+    GA12_ROW_BY_BLANK_NUMBER,
+    Ga12Row,
+)
 
 _MONTH_ENUM = [
     "January", "February", "March", "April", "May", "June",
@@ -25,6 +30,21 @@ GA12_SHEET_MARKERS = (
     "выполненный тоннокилометраж",
 )
 GA12_SHEET_MARKERS_REQUIRED = 4
+
+# Графы бланка в индексах листа (0-based): 1 — показатель, 2 — № строки,
+# 4 — код по ОКЕИ.
+TITLE_COL = 0
+ROW_NUMBER_COL = 1
+OKEI_COL = 3
+
+# Вид сообщения → графы бланка. Международные хранятся суммой граф 4 и 5;
+# графа 9 «ИТОГО» производная и не грузится, иначе она удвоила бы отчёт.
+GA12_ROUTE_COLUMNS: Tuple[Tuple[str, Tuple[int, ...]], ...] = (
+    ('trunk', (4, 5)),
+    ('local', (6,)),
+    ('interregional', (7,)),
+    ('subsidir', (8,)),
+)
 
 
 class XLSXParser(BaseParser):
@@ -232,126 +252,135 @@ class XLSXParser(BaseParser):
 
     @classmethod
     def _get_indicators_from_df(cls, df: pd.DataFrame) -> List[Dict]:
-        """Извлечение показателей из DataFrame"""
-        indicators = []
-        
-        # Показатели 12-ГА: номера строк — как в Excel (1-based), в iloc переводим в 0-based.
-        # Регулярные: с Excel-строки 11; нерегулярные: с 26; некоммерческие: строка 36 — заголовок, данные с 37.
-        regular_rows = [
-            (10, '965', 'Самолето-километры', 'тыс.сам.-км'),
-            (11, '642', 'Отправлений воздушных судов', 'ед.'),
-            (12, '356', 'Налет часов', 'час.'),
-            (13, '792', 'Перевезено пассажиров', 'чел.'),
-            (14, '168', 'Перевезено грузов', 'тонн'),
-            (15, '168п', 'Перевезено почты', 'тонн'),
-            (16, '423', 'Выполненный пассажирооборот', 'тыс.пасс.-км'),
-            (17, '423п', 'Предельный пассажирооборот', 'тыс.пасс.-км'),
-            (18, '450', 'Выполненный тоннокилометраж', 'тыс. ткм'),
-            (23, '450п', 'Предельный тоннокилометраж', 'тыс. ткм'),
-        ]
-        
-        irregular_rows = [
-            (25, '965н', 'Самолето-километры', 'тыс.сам.-км'),
-            (26, '642н', 'Отправлений воздушных судов', 'ед.'),
-            (27, '356н', 'Налет часов', 'час.'),
-            (28, '792н', 'Перевезено пассажиров', 'чел.'),
-            (29, '168н', 'Перевезено грузов и почты', 'тонн'),
-            (30, '423н', 'Выполненный пассажирооборот', 'тыс.пасс.-км'),
-            (31, '423нп', 'Предельный пассажирооборот', 'тыс.пасс.-км'),
-            (32, '450н', 'Выполненный тоннокилометраж', 'тыс. ткм'),
-            (33, '450нп', 'Предельный тоннокилометраж', 'тыс. ткм'),
-        ]
+        """Показатели листа 12-ГА: строка бланка опознаётся по своему номеру.
 
-        non_commercial_rows = [
-            (36, '965нк', 'Самолето-километры', 'тыс.сам.-км'),
-            (37, '642нк', 'Отправлений воздушных судов', 'ед.'),
-            (38, '356нк', 'Налет часов', 'час.'),
-            (39, '792нк', 'Перевезено пассажиров', 'чел.'),
-            (40, '168нк', 'Перевезено грузов и почты', 'тонн'),
-            (41, '423нк', 'Выполненный пассажирооборот', 'тыс.пасс.-км'),
-            (42, '423нкп', 'Предельный пассажирооборот', 'тыс.пасс.-км'),
-            (43, '450нк', 'Выполненный тоннокилометраж', 'тыс. ткм'),
-            (44, '450нкп', 'Предельный тоннокилометраж', 'тыс. ткм'),
-        ]
-        
-        # Столбцы Excel E,F — международные (в сумме trunk); G — внутренние всего (local);
-        # H — местные (interregional); I — субсидируемые (subsidir). Индексы 0-based: 4..8.
-        route_columns = {
-            'international': {
-                'cols': [4, 5],
-                'sum': True,
-                'route_type': 'trunk',
-                'regularity': 'regular',
-                'name': 'Международные'
-            },
-            'domestic_total': {
-                'cols': [6],
-                'sum': False,
-                'route_type': 'local',
-                'regularity': 'regular',
-                'name': 'Внутренние всего'
-            },
-            'domestic_local': {
-                'cols': [7],
-                'sum': False,
-                'route_type': 'interregional',
-                'regularity': 'regular',
-                'name': 'Местные'
-            },
-            'domestic_subsidized': {
-                'cols': [8],
-                'sum': False,
-                'route_type': 'subsidir',
-                'regularity': 'regular',
-                'name': 'Субсидируемые'
-            },
-        }
-        
-        def extract_indicators(row_defs, regularity_override=None):
-            for row_idx, code, name, measure in row_defs:
-                if row_idx >= len(df):
-                    continue
-                for route_key, route_info in route_columns.items():
-                    try:
-                        if route_info.get('sum'):
-                            total = Decimal('0')
-                            any_cell = False
-                            for col in route_info['cols']:
-                                if col < df.shape[1]:
-                                    v = cls._safe_decimal(df.iloc[row_idx, col])
-                                    if v is not None:
-                                        any_cell = True
-                                        total += v
-                            value = total if any_cell else None
-                        else:
-                            col = route_info['cols'][0]
-                            if col < df.shape[1]:
-                                value = cls._safe_decimal(df.iloc[row_idx, col])
-                            else:
-                                value = None
-                        
-                        if value is None:
-                            continue
-                        
-                        reg = regularity_override if regularity_override else route_info['regularity']
-                        
-                        indicators.append({
-                            'indicator_code': code,
-                            'indicator_name': name,
-                            'measure': measure,
-                            'route_type': route_info['route_type'],
-                            'regularity': reg,
-                            'value': float(value),
-                        })
-                    except Exception:
-                        continue
-        
-        extract_indicators(regular_rows, 'regular')
-        extract_indicators(irregular_rows, 'irregular')
-        extract_indicators(non_commercial_rows, 'non_commercial')
-        
+        Раньше строки адресовались жёсткими индексами листа. На настоящем бланке
+        они оказались смещены на единицу: индекс первой строки данных указывал на
+        заголовок раздела, и каждое значение попадало в базу под кодом следующего
+        показателя — самолёто-километры под «Отправлений воздушных судов» и так
+        далее по всему бланку. Ни одной ошибки при этом не возникало.
+
+        Теперь ключ — № строки из графы 2 (1…20 сквозь все три раздела), а графа
+        «Код по ОКЕИ» служит перекрёстной проверкой. Строки детализации
+        тоннокилометража номера не имеют и опознаются маркером «а)», «б)», «в)»
+        под своей родительской строкой.
+        """
+        indicators: List[Dict] = []
+
+        for row_idx in range(df.shape[0]):
+            row = cls._blank_row_at(df, row_idx)
+            if row is None:
+                continue
+            for entry in cls._values_at(df, row_idx):
+                route_type, value = entry
+                indicators.append({
+                    'indicator_code': row.code,
+                    'indicator_name': row.name,
+                    'measure': row.measure,
+                    'route_type': route_type,
+                    'regularity': row.section,
+                    'value': float(value),
+                })
+
         return indicators
-    
+
+    @classmethod
+    def _blank_row_at(cls, df: pd.DataFrame, row_idx: int) -> Optional[Ga12Row]:
+        """Строка бланка, описанная в этой строке листа, либо None."""
+        title = df.iloc[row_idx, TITLE_COL] if df.shape[1] > TITLE_COL else None
+        if not cls._is_data_title(title):
+            return None
+
+        number = cls._blank_number(df.iloc[row_idx, ROW_NUMBER_COL]) if df.shape[1] > ROW_NUMBER_COL else None
+        if number is not None:
+            row = GA12_ROW_BY_BLANK_NUMBER.get(number)
+            if row is None:
+                return None
+            cls._check_okei(df, row_idx, row)
+            return row
+
+        # Номера нет — это может быть строка детализации тоннокилометража.
+        return cls._detail_row_at(df, row_idx, title)
+
+    @classmethod
+    def _detail_row_at(cls, df: pd.DataFrame, row_idx: int, title) -> Optional[Ga12Row]:
+        marker = str(title).strip()[:2]
+        row = GA12_DETAIL_ROW_BY_MARKER.get(marker)
+        if row is None:
+            return None
+        cls._check_okei(df, row_idx, row)
+        return row
+
+    @classmethod
+    def _check_okei(cls, df: pd.DataFrame, row_idx: int, row: Ga12Row) -> None:
+        """Сверка с графой «Код по ОКЕИ»: пустая графа пропускается, чужая — отказ.
+
+        Расхождение означает, что разбирается бланк с другой раскладкой строк, а
+        не 12-ГА, который описан в utils/ga12_layout.py. Молча пропустить такую
+        строку нельзя: отчёт уйдёт в базу неполным и без единого признака этого.
+        """
+        if df.shape[1] <= OKEI_COL:
+            return
+        raw = df.iloc[row_idx, OKEI_COL]
+        if raw is None or (isinstance(raw, float) and pd.isna(raw)):
+            return
+        okei = str(raw).strip().split('.')[0]
+        if okei and okei != row.okei:
+            raise ValueError(
+                f"Строка {row_idx + 1} листа: код по ОКЕИ «{okei}» не совпадает с бланком 12-ГА "
+                f"(у строки «{row.name}» ожидается «{row.okei}»). Похоже, это другая форма "
+                f"или изменённая раскладка бланка."
+            )
+
+    @classmethod
+    def _values_at(cls, df: pd.DataFrame, row_idx: int) -> List[Tuple[str, Decimal]]:
+        """Значения строки по видам сообщения.
+
+        Графы бланка: 4 и 5 — международные (в базу идёт их сумма), 6 — внутренние
+        всего, 7 — из них местные, 8 — из них субсидируемые. Графа 9 «ИТОГО
+        гр.4+гр.5+гр.6» — производная, в базу не грузится.
+        """
+        out: List[Tuple[str, Decimal]] = []
+        for route_type, cols in GA12_ROUTE_COLUMNS:
+            total = Decimal('0')
+            found = False
+            for col in cols:
+                if col >= df.shape[1]:
+                    continue
+                value = cls._safe_decimal(df.iloc[row_idx, col])
+                if value is not None:
+                    found = True
+                    total += value
+            if found:
+                out.append((route_type, total))
+        return out
+
+    @staticmethod
+    def _is_data_title(raw) -> bool:
+        """Строка данных названа показателем; строка нумерации граф — нет.
+
+        Под шапкой бланка идёт служебная строка «1|2|3|…|9», нумерующая графы. В её
+        графе 2 стоит число 2, по которому она неотличима от строки 02 бланка, а в
+        графах данных — номера 4…9, которые ушли бы в базу как значения.
+        """
+        if raw is None or (isinstance(raw, float) and pd.isna(raw)):
+            return False
+        text = str(raw).strip()
+        if not text:
+            return False
+        return not text.replace(',', '.').replace('.', '').isdigit()
+
+    @staticmethod
+    def _blank_number(raw) -> Optional[int]:
+        """№ строки из графы 2 бланка (1…20), иначе None."""
+        if raw is None or (isinstance(raw, float) and pd.isna(raw)) or isinstance(raw, bool):
+            return None
+        try:
+            number = int(str(raw).strip().replace(',', '.').split('.')[0])
+        except (TypeError, ValueError):
+            return None
+        return number
+
     @classmethod
     def _safe_decimal(cls, val) -> Optional[Decimal]:
         """Безопасное преобразование значения в Decimal."""

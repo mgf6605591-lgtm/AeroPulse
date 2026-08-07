@@ -1,5 +1,7 @@
 # services/parse_service.py
 import xml.etree.ElementTree as ET
+from pathlib import Path
+
 from parsers.xlsx_parser import XLSXParser
 from parsers.xml_parser import XMLParser
 from parsers.f15_xml_parser import F15XMLParser
@@ -26,7 +28,10 @@ class ParseService:
         Returns:
             dict: структурированные данные для импорта
         """
-        if file_path.endswith(('.xlsx', '.xls')):
+        # Расширение сравнивается в нижнем регистре: Windows не различает регистр
+        # в именах файлов, и присланный отчёт с «.XLSX» не открывался вовсе (BUG-6).
+        suffix = Path(file_path).suffix.lower()
+        if suffix in ('.xlsx', '.xls'):
             # Форма выбирается по содержимому книги, а не по тому, что указал
             # пользователь: раньше любой XLSX разбирался раскладкой 12-ГА, и бланк
             # аэропорта молча попадал в отчётность авиакомпании и наоборот (DATA-6).
@@ -39,7 +44,7 @@ class ParseService:
                 entity_id=entity_id,
                 entity_name=entity_name
             )
-        elif file_path.endswith('.xml'):
+        elif suffix == '.xml':
             tree = ET.parse(file_path)
             root = tree.getroot()
             if F15XMLParser.is_meta_template_only(root):
