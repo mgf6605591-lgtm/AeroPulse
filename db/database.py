@@ -47,6 +47,11 @@ def _sqlite_pragmas(dbapi_conn, _connection_record):
         cursor.close()
 
 
+def db_path() -> Path:
+    """Путь к файлу базы — для операций над самим файлом (резервные копии)."""
+    return _db_path
+
+
 @contextmanager
 def get_session():
     Session_local = sessionmaker(bind=engine, expire_on_commit=False)

@@ -17,8 +17,10 @@ from PyQt6.QtWidgets import (
     QPushButton, QFileDialog, QMessageBox, QApplication
 )
 from PyQt6.QtCore import Qt
-from db.database import get_session
+from db.backup import make_backup
+from db.database import db_path, get_session
 from db.models.entities import Airline, AirlineIndicators, AirportIndicators
+from services import journal_service as journal
 from services.import_service import ImportService
 from controllers.filter_controller import FilterController
 from controllers.export_controller import ExportController
@@ -177,6 +179,15 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Предупреждение", "Не выбрано предприятие")
             return
 
+        # Импорт заменяет период целиком: строки, исчезнувшие из исправленного
+        # отчёта, удаляются (DATA-5). Копия снимается до первого файла — одна на
+        # весь пакет, а не на каждый.
+        import_backup = None
+        try:
+            import_backup = make_backup(db_path(), reason="import")
+        except Exception:
+            traceback.print_exc()
+
         try:
             QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
             report_lines = []
@@ -218,6 +229,8 @@ class MainWindow(QMainWindow):
             QApplication.restoreOverrideCursor()
 
             report = "\n".join(report_lines)
+            if import_backup:
+                report += f"\n\nКопия базы перед импортом: {import_backup.name}"
             if any_success:
                 QMessageBox.information(self, "Импорт завершён", report)
                 self._reload_reference_lists()
@@ -312,6 +325,14 @@ class MainWindow(QMainWindow):
         if reply != QMessageBox.StandardButton.Yes:
             return
 
+        # Копия базы снимается до удаления: отменить его нечем, а отчётность
+        # восстанавливается только повторной загрузкой файлов (FUNC-6).
+        backup_path = None
+        try:
+            backup_path = make_backup(db_path(), reason="delete")
+        except Exception:
+            traceback.print_exc()
+
         deleted = 0
         try:
             with get_session() as session:
@@ -329,7 +350,15 @@ class MainWindow(QMainWindow):
                             deleted += 1
                 session.commit()
 
-            QMessageBox.information(self, "Готово", f"Удалено записей: {deleted}")
+            journal.record_deletion(
+                count=deleted,
+                entity_type='airline' if self.current_mode == MODE_AIRLINE else 'airport',
+                message=f"копия базы: {backup_path.name}" if backup_path else "копия базы не снята",
+                user=getattr(self.current_user, "username", None),
+            )
+
+            note = f"\nКопия базы: {backup_path.name}" if backup_path else ""
+            QMessageBox.information(self, "Готово", f"Удалено записей: {deleted}{note}")
             self._load_initial_data()
 
         except Exception as e:
