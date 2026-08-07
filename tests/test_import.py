@@ -219,9 +219,11 @@ class QueryCountTest(ImportCase):
 
     def count_queries(self, indicators) -> Counter:
         counter = Counter()
+        self.statements = []
 
         def count(conn, cursor, statement, params, context, executemany):
             counter[statement.lstrip().split()[0].upper()] += 1
+            self.statements.append(statement)
 
         event.listen(self.engine, "before_cursor_execute", count)
         try:
@@ -247,15 +249,23 @@ class QueryCountTest(ImportCase):
         """Справочники, рейсы и строки периода — по одному запросу, а не по строке."""
         self.assertLessEqual(self.count_queries(self.rows(50))["SELECT"], 10)
 
-    def test_repeat_import_of_unchanged_report_writes_nothing(self):
-        """Значения те же — записывать нечего, хотя проход по файлу полный."""
+    def test_repeat_import_of_unchanged_report_writes_no_data(self):
+        """Значения те же — в отчётность не пишется ничего.
+
+        Строка журнала при этом добавляется: загрузка была, и она записана
+        (FUNC-5). Поэтому проверяются обращения к таблице отчётности, а не
+        общее число INSERT.
+        """
         rows = self.rows(20)
         self.count_queries(rows)
 
-        again = self.count_queries(rows)
+        self.count_queries(rows)
 
-        self.assertEqual(0, again["INSERT"])
-        self.assertEqual(0, again["UPDATE"])
+        touching_data = [
+            sql for sql in self.statements
+            if sql.lstrip().upper().startswith(("INSERT", "UPDATE")) and "airlineInd" in sql
+        ]
+        self.assertEqual([], touching_data)
 
 
 class DuplicateRowsTest(ImportCase):
