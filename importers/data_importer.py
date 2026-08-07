@@ -12,6 +12,20 @@ from utils.constants import GA12_DETAIL_TON_PARENT
 import time
 
 
+def _exact_decimal(value):
+    """Значение отчётной строки как `Decimal`.
+
+    Приведения к `float` здесь больше нет. Оно стояло прямо перед записью в
+    колонку, объявленную десятичной, и обесценивало разбор: парсеры аккуратно
+    строят `Decimal` из текста бланка, а в базу уходило двоичное приближение
+    (BUG-4). Значения не из парсеров переводятся через `str`, чтобы не занести
+    ту же ошибку окольным путём: `Decimal(0.1)` даёт 0.1000000000000000055…
+    """
+    if value is None or isinstance(value, Decimal):
+        return value
+    return Decimal(str(value))
+
+
 class DataImporter:
     """Импортер данных в БД с обработкой блокировок"""
 
@@ -113,7 +127,13 @@ class DataImporter:
                     Indicator.code == code
                 ).first()
 
-            if not indicator and name:
+            # Поиск по названию — только когда кода нет вовсе. Названия строк в
+            # бланке повторяются: «Самолето-километры» стоит и в регулярных
+            # перевозках (965), и в нерегулярных (965н), «Налет часов» — ещё и в
+            # некоммерческих (356нк). С поиском по названию строка 965н находила
+            # уже созданный показатель 965, сама в справочнике не заводилась, а её
+            # значения уходили под чужой код (DATA-8).
+            if not indicator and not code and name:
                 indicator = session.query(Indicator).filter(
                     Indicator.name == name
                 ).first()
@@ -236,8 +256,7 @@ class DataImporter:
                 if value is None:
                     continue
                 
-                if isinstance(value, Decimal):
-                    value = float(value)
+                value = _exact_decimal(value)
                 
                 # Проверяем существующую запись
                 existing = session.query(AirlineIndicators).filter(
@@ -338,8 +357,7 @@ class DataImporter:
                 if value is None:
                     continue
                 
-                if isinstance(value, Decimal):
-                    value = float(value)
+                value = _exact_decimal(value)
                 
                 existing = session.query(AirportIndicators).filter(
                     AirportIndicators.indicator_id == indicator.id,
