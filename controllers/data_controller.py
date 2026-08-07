@@ -25,6 +25,7 @@ from utils.constants import (
     PIVOT_LAYOUT_SUMMARY,
     MODE_AIRPORT,
 )
+from utils.ga12_layout import ga12_total_route_types
 from utils.ga15_airport_layout import (
     GA15_METRIC_TAGS,
     GA15_FLAT_HEADERS,
@@ -123,19 +124,33 @@ def _ga15_sum_metric(agg: Dict[str, Decimal], row_code: str, tag: str) -> tuple:
 
 
 def _route_type_keys_for_total_sum(selected_route_type_names: List[str]) -> Set[str]:
+    """Виды сообщения, по которым складывается итог.
+
+    Прежняя версия исходила из обратной вложенности — будто «Местные» включают
+    внутренние и субсидируемые, — и при выборе одного вида работала лишь потому,
+    что лишние ключи отсекались SQL-фильтром и давали нули. Без фильтра по
+    маршрутам в сумму шли все четыре вида, то есть местные и субсидируемые
+    считались дважды: в бланке они подписаны «из них» и входят в графу
+    «Внутренние — всего» (см. GA12_ROUTE_PARENT).
     """
-    Столбец «Всего»: сумма по выбранным видам маршрута.
-    «Местные» (interregional) в сумме включают внутренние и субсидируемые — всё немеждународное
-    в одном блоке; при одновременном выборе нескольких из {local, interregional, subsidir}
-    каждый ключ учитывается один раз.
+    return ga12_total_route_types(selected_route_type_names)
+
+
+def _collapse_route_types(raw: Dict[tuple, Decimal], target: Dict[str, Any]) -> None:
+    """Сворачивает `(ключ, период, предприятие, вид сообщения) → значение` в итог.
+
+    Итог берётся не по всем видам сообщения, а только по невложенным: см.
+    `_route_type_keys_for_total_sum`.
     """
-    keys: Set[str] = set()
-    for rt in selected_route_type_names:
-        if rt == "interregional":
-            keys.update(("local", "interregional", "subsidir"))
-        else:
-            keys.add(rt)
-    return keys
+    buckets: Dict[tuple, Dict[str, Decimal]] = defaultdict(dict)
+    for (key, period, entity, route_type), value in raw.items():
+        buckets[(key, period, entity)][route_type] = value
+
+    for (key, period, entity), by_route in buckets.items():
+        total_keys = ga12_total_route_types(by_route)
+        target[key][period][entity] = sum(
+            (by_route[k] for k in total_keys), Decimal("0")
+        )
 
 
 def _dec_to_float(v: Decimal) -> float:
@@ -329,6 +344,12 @@ class DataController:
         airlines = set()
         periods_seen: Set[tuple] = set()
 
+        # Значения копятся раздельно по видам сообщения и сворачиваются ниже:
+        # местные и субсидируемые входят во внутренние, поэтому сложение всех
+        # видов подряд учитывало бы их дважды (BUG-2).
+        raw_by_code: Dict[tuple, Decimal] = defaultdict(lambda: Decimal('0'))
+        raw_by_name: Dict[tuple, Decimal] = defaultdict(lambda: Decimal('0'))
+
         for rec in records:
             if not rec.indicator or not rec.shipping or not rec.shipping.airline:
                 continue
@@ -337,13 +358,18 @@ class DataController:
             airlines.add(airline_name)
             periods_seen.add(period)
             code = (rec.indicator.code or "").strip()
+            route = getattr(rec.shipping, "route", None)
+            rt_key = _norm_route_type(route.type) if route else ""
             if rec.value is not None:
                 if code:
-                    ind_by_code[code][period][airline_name] += rec.value
+                    raw_by_code[(code, period, airline_name, rt_key)] += rec.value
                 else:
                     ind_name = rec.indicator.name.strip()
-                    ind_by_name_nocode[ind_name][period][airline_name] += rec.value
+                    raw_by_name[(ind_name, period, airline_name, rt_key)] += rec.value
                     measure_nocode[ind_name] = (rec.indicator.measure or "").strip()
+
+        _collapse_route_types(raw_by_code, ind_by_code)
+        _collapse_route_types(raw_by_name, ind_by_name_nocode)
 
         with get_session() as session:
             code_to_row = {
@@ -775,7 +801,10 @@ class DataController:
         agg: Dict[tuple, Dict[Any, Decimal]] = defaultdict(lambda: defaultdict(lambda: Decimal("0")))
         for (_reg_key, _ind_name), md in data.items():
             for period, rt_dict in md.items():
-                agg[(_reg_key, _ind_name)][period] += sum(rt_dict.values())
+                # Не `sum(rt_dict.values())`: местные и субсидируемые входят во
+                # внутренние, и сумма по всем видам считала бы их дважды.
+                keys = ga12_total_route_types(rt_dict)
+                agg[(_reg_key, _ind_name)][period] += sum(rt_dict[k] for k in keys)
 
         name_to_id = _name_to_indicator_id_from_records(records)
         code_to_indicator: Dict[str, Indicator] = {}
