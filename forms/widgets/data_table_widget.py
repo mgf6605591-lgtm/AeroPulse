@@ -7,7 +7,7 @@ from db.models.pivot_dict_model import PivotDictModel
 from db.models.multilevel_header import MultiLevelHeaderView
 from controllers.data_controller import DataController
 from controllers.export_controller import ExportController
-from utils.constants import VIEW_PIVOT, VIEW_DETAIL
+from utils.constants import GA12_TOTAL_HEADER, ROUTE_TYPE_NAMES, VIEW_PIVOT, VIEW_DETAIL
 
 
 class DataTableWidget(QWidget):
@@ -145,14 +145,17 @@ class DataTableWidget(QWidget):
             'Код ОКЕИ': 80,
             'Свод': 100,
             'Всего': 100,
+            GA12_TOTAL_HEADER: 100,
         }
-        
-        # Типы маршрутов для одной авиакомпании
+
+        # Типы маршрутов для одной авиакомпании. Подписи берутся из констант, а не
+        # повторяются здесь: иначе после правки заголовка ширина молча переставала
+        # применяться, а разъехавшиеся колонки списывали бы на длину названия.
         route_widths = {
-            'Международные': 140,
-            'Внутренние': 120,
-            'Местные': 100,
-            'Субсидируемые': 140,
+            ROUTE_TYPE_NAMES['trunk']: 140,
+            ROUTE_TYPE_NAMES['local']: 150,
+            ROUTE_TYPE_NAMES['interregional']: 130,
+            ROUTE_TYPE_NAMES['subsidir']: 170,
         }
         
         for col, header in enumerate(headers):

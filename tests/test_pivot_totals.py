@@ -108,6 +108,39 @@ class PivotTotalsTest(PivotCase):
         self.assertEqual(BLANK_TOTAL * 2, row["m_2025_January_total"])
 
 
+class HeaderWordingTest(PivotCase):
+    """Подписи колонок повторяют шапку бланка.
+
+    Короткие «Внутренние», «Местные», «Субсидируемые» скрывали вложенность граф:
+    итог по ним не складывается, и без слов «из них» верная цифра выглядела бы
+    ошибкой — колонка «Всего» меньше суммы соседних.
+    """
+
+    def test_route_columns_follow_the_blank(self):
+        result = self.build_per_airline_by_routes(blank_row_records())
+
+        self.assertIn("Внутренние — всего", result["headers"])
+        self.assertIn("из них местные", result["headers"])
+        self.assertIn("из них субсидируемые", result["headers"])
+
+    def test_total_column_is_named_as_in_the_blank(self):
+        result = self.build_per_airline_by_routes(blank_row_records())
+
+        self.assertIn("ИТОГО", result["headers"])
+        self.assertNotIn("Всего", result["headers"])
+
+    def test_multi_airline_headers_name_the_airline(self):
+        result = self.build_multi_airline_by_routes(blank_row_records())
+
+        self.assertIn("Тестовая АК — ИТОГО", result["headers"])
+
+    def test_summary_layout_keeps_its_own_total(self):
+        """Там «Всего» — сумма по месяцам, а не итог бланка: переименовывать нечего."""
+        result = self.build_per_airline_summary(blank_row_records())
+
+        self.assertIn("Всего", result["headers"])
+
+
 class FilteredTotalsTest(PivotCase):
     """Фильтр по видам маршрута: итог считается по показанным графам."""
 

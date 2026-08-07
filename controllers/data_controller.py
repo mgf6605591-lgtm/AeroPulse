@@ -20,6 +20,7 @@ from utils.constants import (
     GA12_SUBHEADING_VTOM,
     GA12_DETAIL_TON_CODES,
     GA12_TON_PARENT_CODES,
+    GA12_TOTAL_HEADER,
     MODE_AIRLINE,
     PIVOT_LAYOUT_BY_ROUTES,
     PIVOT_LAYOUT_SUMMARY,
@@ -541,7 +542,7 @@ class DataController:
                 headers.append(ROUTE_TYPE_NAMES[rt])
                 keys.append(f"m_{pk}_rt_{rt}")
                 col += 1
-            headers.append("Всего")
+            headers.append(GA12_TOTAL_HEADER)
             keys.append(f"m_{pk}_total")
             col += 1
             last = col - 1
@@ -683,7 +684,7 @@ class DataController:
                     headers.append(f"{aname} — {ROUTE_TYPE_NAMES[rt]}")
                     keys.append(f"m_{pk}_aid_{aid}_rt_{rt}")
                     col += 1
-                headers.append(f"{aname} — Всего")
+                headers.append(f"{aname} — {GA12_TOTAL_HEADER}")
                 keys.append(f"m_{pk}_aid_{aid}_total")
                 col += 1
             last = col - 1
