@@ -107,17 +107,22 @@ class RegisterButtonIsGoneTest(unittest.TestCase):
         """
         from forms.auth import Auth
 
-        current = Auth._resolve_auth_ui_path().read_text(encoding="utf-8")
-        stale = current.replace(
-            "  </widget>\n  <widget class=\"QMenuBar\"",
-            "   <widget class=\"QPushButton\" name=\"pushButton\">\n"
-            "    <property name=\"text\">\n"
-            "     <string>Зарегистрироваться</string>\n"
-            "    </property>\n"
-            "   </widget>\n"
-            "  </widget>\n  <widget class=\"QMenuBar\"",
+        # Разметка подделывается разбором XML, а не заменой подстроки. Прежде
+        # здесь стоял якорь по тексту, и правка разметки под FUNC-8 его унесла:
+        # замена перестала применяться, а страховка `assertIn` продолжала
+        # срабатывать — на слове «Зарегистрироваться» в комментарии. Тест
+        # оставался зелёным, ничего не проверяя.
+        root = ElementTree.parse(Auth._resolve_auth_ui_path()).getroot()
+        central = root.find(".//widget[@name='centralwidget']")
+        self.assertIsNotNone(central, "в разметке нет центрального виджета")
+        button = ElementTree.SubElement(
+            central, "widget", {"class": "QPushButton", "name": "pushButton"}
         )
-        self.assertIn("Зарегистрироваться", stale, "подделка разметки не удалась")
+        caption = ElementTree.SubElement(button, "property", {"name": "text"})
+        ElementTree.SubElement(caption, "string").text = "Зарегистрироваться"
+        stale = ElementTree.tostring(root, encoding="unicode")
+
+        self.assertIn('name="pushButton"', stale, "подделка разметки не удалась")
 
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "auth.ui"
@@ -127,6 +132,75 @@ class RegisterButtonIsGoneTest(unittest.TestCase):
 
         captions = [b.text() for b in window.findChildren(QPushButton)]
         self.assertEqual(["Войти"], captions)
+
+
+@unittest.skipUnless(HAS_QT, "PyQt6 не установлен")
+class LoginWindowIsLaidOutTest(unittest.TestCase):
+    """FUNC-8: окно входа было размечено координатами, без единого компоновщика.
+
+    Оно не масштабировалось, не подстраивалось под системный шрифт и под
+    укрупнение интерфейса: подписи наезжали друг на друга. Класс формы и
+    заголовок окна при этом назывались `MainWindow` — форма создавалась
+    копированием шаблона главного окна и не переименовывалась.
+    """
+
+    def setUp(self):
+        from forms.auth import Auth
+
+        self.window = Auth()
+        self.addCleanup(self.window.deleteLater)
+        self.markup = ElementTree.parse(Auth._resolve_auth_ui_path()).getroot()
+
+    def test_markup_uses_layouts(self):
+        self.assertNotEqual([], self.markup.findall(".//layout"))
+
+    def test_no_widget_is_placed_by_coordinates(self):
+        """Своя геометрия остаётся только у самого окна — это его начальный размер."""
+        placed = [
+            widget.get("name")
+            for widget in self.markup.iter("widget")
+            if widget.find("property[@name='geometry']") is not None
+            and widget.get("class") != "QMainWindow"
+        ]
+        self.assertEqual([], placed)
+
+    def test_central_widget_has_a_layout(self):
+        self.assertIsNotNone(self.window.centralWidget().layout())
+
+    def test_fields_follow_the_window_size(self):
+        """Поведенческая проверка: при фиксированных координатах поле не двигалось."""
+        self.window.show()
+        self.window.resize(340, 200)
+        QApplication.processEvents()
+        narrow = self.window.login.width()
+
+        self.window.resize(700, 200)
+        QApplication.processEvents()
+
+        self.assertGreater(self.window.login.width(), narrow)
+
+    def test_window_is_not_called_mainwindow_anymore(self):
+        self.assertNotEqual("MainWindow", self.window.windowTitle())
+        self.assertIn("AeroPulse", self.window.windowTitle())
+        self.assertNotEqual("MainWindow", self.markup.findtext("class"))
+
+    def test_template_leftovers_are_gone(self):
+        """Пустые строка меню и строка состояния пришли из шаблона главного окна."""
+        classes = {widget.get("class") for widget in self.markup.iter("widget")}
+
+        self.assertNotIn("QMenuBar", classes)
+        self.assertNotIn("QStatusBar", classes)
+
+    def test_window_is_sized_for_a_login_form(self):
+        """Прежде окно входа открывалось размером 800×600 — под главное окно."""
+        rect = self.markup.find(".//widget[@class='QMainWindow']/property[@name='geometry']/rect")
+
+        self.assertLessEqual(int(rect.findtext("width")), 500)
+        self.assertLessEqual(int(rect.findtext("height")), 400)
+
+    def test_enter_submits_the_form(self):
+        """Кнопка по умолчанию: с формой на компоновщиках это стало уместно."""
+        self.assertTrue(self.window.loginBtn.isDefault())
 
 
 @unittest.skipUnless(HAS_QT, "PyQt6 не установлен")
