@@ -101,7 +101,7 @@ class DetailRowsAreDistinguishableTest(unittest.TestCase):
 
     def setUp(self):
         from controllers.data_controller import DataController
-        from db.models.sqlalchemy_table_model import SQLAlchemyTableModel
+        from forms.models.sqlalchemy_table_model import SQLAlchemyTableModel
 
         from services.detail_rows import DetailRow
 
@@ -122,7 +122,7 @@ class DetailRowsAreDistinguishableTest(unittest.TestCase):
         self.model = SQLAlchemyTableModel()
         self.model.setHeaders(data["headers"])
         self.model.setColumnAttributes(data["attrs"])
-        self.model.setData(data["records"])
+        self.model.set_source_data(data["records"])
         self.column = data["headers"].index("Регулярность")
 
     def row_text(self, row):

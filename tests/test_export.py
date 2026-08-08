@@ -52,14 +52,14 @@ ROWS = [
 @unittest.skipUnless(HAS_QT, "PyQt6 не установлен")
 class ExportCase(unittest.TestCase):
     def setUp(self):
-        from db.models.pivot_dict_model import PivotDictModel
+        from forms.models.pivot_dict_model import PivotDictModel
 
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
         self.path = os.path.join(tmp.name, "export.xlsx")
 
         self.model = PivotDictModel()
-        self.model.setData(ROWS, HEADERS, KEYS)
+        self.model.set_source_data(ROWS, HEADERS, KEYS)
         self.view = QTableView()
         self.addCleanup(self.view.deleteLater)
         self.view.setModel(self.model)
@@ -123,12 +123,12 @@ class FormulaInjectionTest(ExportCase):
         self.assertEqual("=1+1", cell.value)
 
     def test_other_formula_starters_stay_text(self):
-        from db.models.pivot_dict_model import PivotDictModel
+        from forms.models.pivot_dict_model import PivotDictModel
 
         rows = [{"indicator": text, "m_2025_January": 1.0, "m_2025_February": 1.0}
                 for text in ("+7 (495) 000", "-скидка", "@сотрудник", "=cmd|'/c calc'!A1")]
         self.model = PivotDictModel()
-        self.model.setData(rows, HEADERS, KEYS)
+        self.model.set_source_data(rows, HEADERS, KEYS)
         self.view.setModel(self.model)
 
         ws = self.export()
@@ -160,10 +160,10 @@ class PivotModelFormattingTest(unittest.TestCase):
     """BUG-27: на экране — русская запись числа."""
 
     def setUp(self):
-        from db.models.pivot_dict_model import PivotDictModel
+        from forms.models.pivot_dict_model import PivotDictModel
 
         self.model = PivotDictModel()
-        self.model.setData(ROWS, HEADERS, KEYS)
+        self.model.set_source_data(ROWS, HEADERS, KEYS)
 
     def display(self, row, col):
         from PyQt6.QtCore import Qt
@@ -171,7 +171,7 @@ class PivotModelFormattingTest(unittest.TestCase):
         return self.model.data(self.model.index(row, col), Qt.ItemDataRole.DisplayRole)
 
     def raw(self, row, col):
-        from db.models.roles import RAW_VALUE_ROLE
+        from forms.models.roles import RAW_VALUE_ROLE
 
         return self.model.data(self.model.index(row, col), RAW_VALUE_ROLE)
 
@@ -204,15 +204,15 @@ class DetailModelRawValueTest(unittest.TestCase):
             self.year = 2025
 
     def setUp(self):
-        from db.models.sqlalchemy_table_model import SQLAlchemyTableModel
+        from forms.models.sqlalchemy_table_model import SQLAlchemyTableModel
 
         self.model = SQLAlchemyTableModel()
         self.model.setHeaders(["Значение", "Месяц", "Год"])
         self.model.setColumnAttributes(["value", "month", "year"])
-        self.model.setData([self.FakeRecord()])
+        self.model.set_source_data([self.FakeRecord()])
 
     def raw(self, col):
-        from db.models.roles import RAW_VALUE_ROLE
+        from forms.models.roles import RAW_VALUE_ROLE
 
         return self.model.data(self.model.index(0, col), RAW_VALUE_ROLE)
 
