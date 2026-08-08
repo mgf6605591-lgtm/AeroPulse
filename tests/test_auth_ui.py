@@ -9,8 +9,11 @@
 """
 
 import os
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
+from xml.etree import ElementTree
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -22,7 +25,7 @@ from tests.support import MigratedDbCase, scalar
 from utils.passwords import is_hashed
 
 try:
-    from PyQt6.QtWidgets import QApplication, QDialog, QLineEdit
+    from PyQt6.QtWidgets import QApplication, QDialog, QLineEdit, QPushButton
     HAS_QT = True
 except ImportError:  # PyQt6 отсутствует — проверки Qt пропускаются
     HAS_QT = False
@@ -54,6 +57,76 @@ class AuthWindowTest(unittest.TestCase):
         window = Auth()
         self.addCleanup(window.deleteLater)
         self.assertEqual(QLineEdit.EchoMode.Normal, window.login.echoMode())
+
+
+@unittest.skipUnless(HAS_QT, "PyQt6 не установлен")
+class RegisterButtonIsGoneTest(unittest.TestCase):
+    """FUNC-3: кнопка «Зарегистрироваться» была видима и не делала ничего.
+
+    Единственным способом получить доступ оставалась захардкоженная пара
+    admin/123 (SEC-2). Её больше нет, а регистрация приложению не нужна вовсе:
+    пользователь один, первую учётную запись заводит окно первичной настройки.
+    Поэтому кнопка убрана, а не подключена.
+    """
+
+    def make_window(self):
+        from forms.auth import Auth
+
+        window = Auth()
+        self.addCleanup(window.deleteLater)
+        return window
+
+    def test_window_has_no_register_button(self):
+        window = self.make_window()
+
+        captions = [b.text() for b in window.findChildren(QPushButton)]
+        self.assertEqual(["Войти"], captions)
+
+    def test_markup_file_declares_no_register_button(self):
+        """И в файле разметки тоже: экранной проверки мало, файл лежит отдельно.
+
+        Разметка разбирается как XML, а не ищется подстрокой: слово
+        «Зарегистрироваться» осталось в комментарии, объясняющем, почему кнопки
+        здесь нет, — и поиск по тексту спотыкался бы об это объяснение.
+        """
+        from forms.auth import Auth
+
+        root = ElementTree.parse(Auth._resolve_auth_ui_path()).getroot()
+        buttons = [
+            widget.get("name") for widget in root.iter("widget")
+            if widget.get("class") == "QPushButton"
+        ]
+
+        self.assertEqual(["loginBtn"], buttons)
+
+    def test_stale_markup_next_to_the_exe_does_not_bring_it_back(self):
+        """Разметка ищется в трёх местах, включая каталог рядом с exe.
+
+        Устаревшая копия там вернула бы нерабочую кнопку на экран — ровно так же,
+        как вернула бы видимый пароль (SEC-4).
+        """
+        from forms.auth import Auth
+
+        current = Auth._resolve_auth_ui_path().read_text(encoding="utf-8")
+        stale = current.replace(
+            "  </widget>\n  <widget class=\"QMenuBar\"",
+            "   <widget class=\"QPushButton\" name=\"pushButton\">\n"
+            "    <property name=\"text\">\n"
+            "     <string>Зарегистрироваться</string>\n"
+            "    </property>\n"
+            "   </widget>\n"
+            "  </widget>\n  <widget class=\"QMenuBar\"",
+        )
+        self.assertIn("Зарегистрироваться", stale, "подделка разметки не удалась")
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "auth.ui"
+            path.write_text(stale, encoding="utf-8")
+            with patch.object(Auth, "_resolve_auth_ui_path", staticmethod(lambda: path)):
+                window = self.make_window()
+
+        captions = [b.text() for b in window.findChildren(QPushButton)]
+        self.assertEqual(["Войти"], captions)
 
 
 @unittest.skipUnless(HAS_QT, "PyQt6 не установлен")
