@@ -7,6 +7,7 @@ from forms.models.pivot_dict_model import PivotDictModel
 from forms.widgets.multilevel_header import MultiLevelHeaderView
 from controllers.data_controller import DataController
 from controllers.export_header import ExportHeader, build_export_header
+from controllers.report_filters import NO_FILTERS, ReportFilters
 from utils.constants import GA12_TOTAL_HEADER, ROUTE_TYPE_NAMES, VIEW_PIVOT, VIEW_DETAIL
 
 
@@ -23,7 +24,7 @@ class DataTableWidget(QWidget):
         # Чем описать выгрузку, знает тот, кто загрузил данные. Экран показывает
         # предприятие и период в строке под таблицей, а в файл они не попадали
         # вовсе (FUNC-4) — теперь показанное запоминается для шапки книги.
-        self._last_filters: dict = {}
+        self._last_filters: ReportFilters = NO_FILTERS
         self._last_stats: dict = {}
         self._init_ui()
         self._setup_models()
@@ -213,20 +214,14 @@ class DataTableWidget(QWidget):
             
             self.data_table.setColumnWidth(col, width)
     
-    def load_data(self, mode: int, filters: dict):
+    def load_data(self, mode: int, filters: ReportFilters):
         """Загрузка данных в таблицу"""
         self.current_mode = mode
-        entity_id = None
-        if filters.get("airline_id"):
-            entity_id = filters["airline_id"]
-        elif filters.get("airport_id"):
-            entity_id = filters["airport_id"]
-        elif filters.get("airline_ids") and len(filters["airline_ids"]) == 1:
-            entity_id = filters["airline_ids"][0]
-        elif filters.get("airport_ids") and len(filters["airport_ids"]) == 1:
-            entity_id = filters["airport_ids"][0]
-        
-        self._last_filters = dict(filters or {})
+        # Четыре ветки подряд отвечали на один вопрос — какое предприятие
+        # выбрано, если оно одно. Теперь это одно производное значение (ARCH-5).
+        entity_id = filters.entity_id
+
+        self._last_filters = filters
 
         if self.current_view == VIEW_PIVOT:
             data = self.data_controller.load_pivot_data(mode, filters, entity_id)

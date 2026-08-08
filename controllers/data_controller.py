@@ -25,6 +25,7 @@ from utils.constants import (
     PIVOT_LAYOUT_BY_ROUTES,
     PIVOT_LAYOUT_SUMMARY,
 )
+from controllers.report_filters import NO_FILTERS, ReportFilters, with_airline, with_airport
 from utils.ga12_layout import ga12_total_route_types
 from utils.ga15_airport_layout import (
     GA15_METRIC_TAGS,
@@ -78,15 +79,13 @@ def _period_count(periods: List[tuple]) -> int:
     return 0 if list(periods) == [EMPTY_PERIOD] else len(periods)
 
 
-def _period_label_ru(filters: Optional[Dict]) -> str:
+def _period_label_ru(filters: Optional[ReportFilters]) -> str:
     if not filters:
         return "выбранный период"
-    pf = filters.get("period_from")
-    pt = filters.get("period_to")
-    if not pf or not pt:
+    period = filters.period
+    if period is None:
         return "выбранный период"
-    yf, mf = pf
-    yt, mt = pt
+    (yf, mf), (yt, mt) = period
     mk_f = MONTHS_LIST[mf - 1]
     mk_t = MONTHS_LIST[mt - 1]
     if yf == yt and mf == mt:
@@ -369,16 +368,16 @@ class DataController:
         self.pivot_model = pivot_model
         self.detail_model = detail_model
     
-    def load_pivot_data(self, mode: int, filters: Dict, entity_id: Optional[int] = None) -> Dict[str, Any]:
+    def load_pivot_data(self, mode: int, filters: ReportFilters, entity_id: Optional[int] = None) -> Dict[str, Any]:
         """Загружает данные для сводной таблицы"""
         if mode == MODE_AIRLINE:
             if entity_id:
-                lay = (filters or {}).get("pivot_table_layout", PIVOT_LAYOUT_BY_ROUTES)
+                lay = (filters or NO_FILTERS).pivot_table_layout or PIVOT_LAYOUT_BY_ROUTES
                 if lay == PIVOT_LAYOUT_SUMMARY:
                     return self._load_pivot_per_airline_summary(filters, entity_id)
                 return self._load_pivot_per_airline(filters, entity_id)
             else:
-                lay = (filters or {}).get("pivot_table_layout", PIVOT_LAYOUT_BY_ROUTES)
+                lay = (filters or NO_FILTERS).pivot_table_layout or PIVOT_LAYOUT_BY_ROUTES
                 if lay == PIVOT_LAYOUT_BY_ROUTES:
                     return self._load_pivot_multi_airline_by_routes(filters)
                 return self._load_pivot_all_airlines(filters)
@@ -387,7 +386,7 @@ class DataController:
                 return self._load_pivot_ga15_airport(filters, entity_id)
             return self._load_pivot_ga15_empty("Выберите аэропорт в списке фильтра.")
     
-    def _load_pivot_all_airlines(self, filters: Dict) -> Dict[str, Any]:
+    def _load_pivot_all_airlines(self, filters: ReportFilters) -> Dict[str, Any]:
         """Сводная таблица для всех авиакомпаний (полный бланк 12-ГА; без данных — нули)."""
         rows = AirlineIndicatorService.aggregate(filters)
 
@@ -516,7 +515,7 @@ class DataController:
         }
     
     def _compute_airline_routes_pivot(
-        self, rows: List[Any], filters: Optional[Dict]
+        self, rows: List[Any], filters: Optional[ReportFilters]
     ) -> Dict[str, Any]:
         """Общая сетка 12-ГА: месяцы × виды маршрута + ИТОГО (выборка уже по одной АК)."""
         data = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: Decimal("0"))))
@@ -545,12 +544,9 @@ class DataController:
 
         periods = _sorted_periods(periods_seen) or [EMPTY_PERIOD]
 
-        f = filters or {}
-        rtm = f.get("route_types")
-        if rtm:
-            route_types_to_show = [getattr(rt, "name", rt) for rt in rtm]
-        elif f.get("route_type"):
-            route_types_to_show = [f["route_type"].name]
+        f = filters if filters is not None else NO_FILTERS
+        if f.route_types:
+            route_types_to_show = [getattr(rt, "name", rt) for rt in f.route_types]
         else:
             route_types_to_show = ROUTE_TYPES_ORDER
 
@@ -601,13 +597,13 @@ class DataController:
             "n_records": n_records,
         }
 
-    def _load_pivot_multi_airline_by_routes(self, filters: Dict) -> Dict[str, Any]:
+    def _load_pivot_multi_airline_by_routes(self, filters: ReportFilters) -> Dict[str, Any]:
         """Несколько АК: по маршрутам; внутри каждого месяца — все выбранные а/к (без данных — нули)."""
         aggregate = AirlineIndicatorService.aggregate(filters)
 
-        f = filters or {}
-        if f.get("airline_ids"):
-            ids = [int(x) for x in f["airline_ids"]]
+        f = filters if filters is not None else NO_FILTERS
+        if f.airline_ids:
+            ids = list(f.airline_ids)
             with get_session() as session:
                 selected = session.query(Airline).filter(Airline.id.in_(ids)).all()
             id_to_name = {a.id: a.name.strip() for a in selected}
@@ -657,11 +653,8 @@ class DataController:
 
         periods = _sorted_periods(periods_seen) or [EMPTY_PERIOD]
 
-        rtm = f.get("route_types")
-        if rtm:
-            route_types_to_show = [getattr(rt, "name", rt) for rt in rtm]
-        elif f.get("route_type"):
-            route_types_to_show = [f["route_type"].name]
+        if f.route_types:
+            route_types_to_show = [getattr(rt, "name", rt) for rt in f.route_types]
         else:
             route_types_to_show = ROUTE_TYPES_ORDER
 
@@ -722,10 +715,9 @@ class DataController:
             },
         }
 
-    def _load_pivot_per_airline(self, filters: Dict, airline_id: int) -> Dict[str, Any]:
+    def _load_pivot_per_airline(self, filters: ReportFilters, airline_id: int) -> Dict[str, Any]:
         """Сводная таблица для одной авиакомпании"""
-        airline_filters = filters.copy() if filters else {}
-        airline_filters["airline_id"] = airline_id
+        airline_filters = with_airline(filters, airline_id)
 
         rows = AirlineIndicatorService.aggregate(airline_filters)
 
@@ -747,10 +739,9 @@ class DataController:
             },
         }
 
-    def _load_pivot_per_airline_summary(self, filters: Dict, airline_id: int) -> Dict[str, Any]:
+    def _load_pivot_per_airline_summary(self, filters: ReportFilters, airline_id: int) -> Dict[str, Any]:
         """Свод по одной АК: по месяцам без разбивки по видам маршрута (сумма по учтённым маршрутам за месяц)."""
-        airline_filters = filters.copy() if filters else {}
-        airline_filters["airline_id"] = airline_id
+        airline_filters = with_airline(filters, airline_id)
 
         aggregate = AirlineIndicatorService.aggregate(airline_filters)
 
@@ -853,10 +844,9 @@ class DataController:
             },
         }
 
-    def _load_pivot_ga15_airport(self, filters: Dict, airport_id: int) -> Dict[str, Any]:
+    def _load_pivot_ga15_airport(self, filters: ReportFilters, airport_id: int) -> Dict[str, Any]:
         """Свод 15-ГА для одного аэропорта (структура как в типовом Excel)."""
-        airport_filters = filters.copy() if filters else {}
-        airport_filters["airport_id"] = airport_id
+        airport_filters = with_airport(filters, airport_id)
 
         rows = AirportIndicatorService.aggregate(airport_filters)
 
@@ -926,7 +916,7 @@ class DataController:
             },
         }
 
-    def load_detail_data(self, mode: int, filters: Dict) -> Dict[str, Any]:
+    def load_detail_data(self, mode: int, filters: ReportFilters) -> Dict[str, Any]:
         """Загружает данные для подробной таблицы"""
         if mode == 1:  # MODE_AIRLINE
             # Регулярность выводится рядом с типом маршрута: вдвоём они и образуют

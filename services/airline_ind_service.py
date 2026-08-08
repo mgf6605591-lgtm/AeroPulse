@@ -7,9 +7,10 @@
 вызов, и ORM-объекты за её пределы не выходят**. Наружу уходят либо суммы для
 свода, либо снимки строк для таблицы.
 """
-from typing import Any, Dict, List
+from typing import Any, List
 
 from controllers.AirlineIndController import AirlineIndController
+from controllers.report_filters import NO_FILTERS, ReportFilters
 from db.database import get_session
 from services.detail_rows import DetailRow, from_airline_indicator
 
@@ -17,13 +18,13 @@ from services.detail_rows import DetailRow, from_airline_indicator
 class AirlineIndicatorService:
 
     @classmethod
-    def aggregate(cls, filters: Dict) -> List[Any]:
+    def aggregate(cls, filters: ReportFilters) -> List[Any]:
         """Ячейки свода: суммы по группам вместо самих фактов (PERF-2)."""
         with get_session() as session:
-            return AirlineIndController.aggregate(session, filters or {})
+            return AirlineIndController.aggregate(session, filters or NO_FILTERS)
 
     @classmethod
-    def detail_rows(cls, filters: Dict) -> List[DetailRow]:
+    def detail_rows(cls, filters: ReportFilters) -> List[DetailRow]:
         """Строки подробной таблицы — снимками, а не записями ORM (BUG-14)."""
         with get_session() as session:
             if filters:

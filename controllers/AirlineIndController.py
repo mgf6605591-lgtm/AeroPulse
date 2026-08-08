@@ -1,4 +1,5 @@
-from typing import Any, List, Dict
+from typing import Any, List
+from controllers.report_filters import ReportFilters
 from controllers.period_filter import apply_period_filter
 from db.models.entities import AirlineIndicators, Shipping, Airline, Indicator, Route
 from sqlalchemy import Float, cast, func, select
@@ -19,7 +20,7 @@ class AirlineIndController:
 
 
     @classmethod
-    def aggregate(cls, session, filters: Dict) -> List[Any]:
+    def aggregate(cls, session, filters: ReportFilters) -> List[Any]:
         """Ячейки свода одним запросом: суммы по группам (PERF-2).
 
         Гранула — самая мелкая из нужных построителям: раздел бланка, показатель,
@@ -62,30 +63,25 @@ class AirlineIndController:
             )
         )
 
-        airline_ids = filters.get("airline_ids")
-        if airline_ids:
-            query = query.filter(Shipping.airline_id.in_(list(airline_ids)))
-        elif filters.get("airline_id"):
-            query = query.filter(Shipping.airline_id == int(filters["airline_id"]))
+        # Ветки на одиночное значение больше нет: `airline_id` проставлялся
+        # ровно тогда, когда в списке был один элемент, и `IN (один)` покрывает
+        # этот случай сам (ARCH-5).
+        if filters.airline_ids:
+            query = query.filter(Shipping.airline_id.in_(filters.airline_ids))
 
-        if filters.get("indicator_ids"):
+        if filters.indicator_ids:
             query = query.filter(
-                AirlineIndicators.indicator_id.in_(list(filters["indicator_ids"]))
+                AirlineIndicators.indicator_id.in_(filters.indicator_ids)
             )
-        elif filters.get("indicator_id"):
-            query = query.filter(AirlineIndicators.indicator_id == int(filters["indicator_id"]))
 
-        route_types = filters.get("route_types")
-        if route_types:
-            query = query.filter(Route.type.in_(list(route_types)))
-        elif filters.get("route_type"):
-            query = query.filter(Route.type == filters["route_type"])
+        if filters.route_types:
+            query = query.filter(Route.type.in_(filters.route_types))
 
         query = apply_period_filter(query, AirlineIndicators, filters)
         return session.execute(query).all()
 
     @classmethod
-    def filter_indicators(cls, session, filters: Dict) -> List[AirlineIndicators]:
+    def filter_indicators(cls, session, filters: ReportFilters) -> List[AirlineIndicators]:
         """Фильтрация показателей авиакомпаний с поддержкой диапазона периода."""
         query = select(AirlineIndicators).options(
             joinedload(AirlineIndicators.indicator),
@@ -93,33 +89,21 @@ class AirlineIndController:
             joinedload(AirlineIndicators.shipping).joinedload(Shipping.route)
         )
 
-        airline_ids = filters.get("airline_ids")
-        airline_id_single = filters.get("airline_id")
-        route_types = filters.get("route_types")
-        route_type_single = filters.get("route_type")
-
-        need_shipping = bool(airline_ids or airline_id_single or route_types or route_type_single)
-        if need_shipping:
+        if filters.airline_ids or filters.route_types:
             query = query.join(AirlineIndicators.shipping)
 
-        if airline_ids:
-            query = query.filter(Shipping.airline_id.in_(list(airline_ids)))
-        elif airline_id_single:
-            query = query.filter(Shipping.airline_id == int(airline_id_single))
+        if filters.airline_ids:
+            query = query.filter(Shipping.airline_id.in_(filters.airline_ids))
 
-        if filters.get("indicator_ids"):
+        if filters.indicator_ids:
             query = query.filter(
-                AirlineIndicators.indicator_id.in_(list(filters["indicator_ids"]))
+                AirlineIndicators.indicator_id.in_(filters.indicator_ids)
             )
-        elif filters.get("indicator_id"):
-            query = query.filter(AirlineIndicators.indicator_id == int(filters["indicator_id"]))
 
         query = apply_period_filter(query, AirlineIndicators, filters)
 
-        if route_types:
-            query = query.join(Shipping.route).filter(Route.type.in_(list(route_types)))
-        elif route_type_single:
-            query = query.join(Shipping.route).filter(Route.type == route_type_single)
+        if filters.route_types:
+            query = query.join(Shipping.route).filter(Route.type.in_(filters.route_types))
 
         return session.execute(query).unique().scalars().all()
 

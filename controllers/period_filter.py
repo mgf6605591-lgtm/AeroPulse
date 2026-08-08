@@ -10,8 +10,6 @@
 Год и месяц сворачиваются в одно число ГГГГММ — в том же виде, в каком период
 сравнивался в Python, только теперь это делает база.
 """
-from typing import Dict
-
 from sqlalchemy import Integer, cast
 
 
@@ -22,19 +20,17 @@ def period_key(model):
     return model.year * 100 + cast(model.month, Integer)
 
 
-def period_bounds(filters: Dict):
-    """Границы периода из фильтров или None, если период не задан целиком."""
-    period_from = filters.get("period_from")
-    period_to = filters.get("period_to")
-    if not period_from or not period_to:
+def period_bounds(filters):
+    """Границы периода как числа ГГГГММ или None, если период не задан целиком."""
+    period = filters.period
+    if period is None:
         return None
 
-    year_from, month_from = period_from
-    year_to, month_to = period_to
+    (year_from, month_from), (year_to, month_to) = period
     return year_from * 100 + month_from, year_to * 100 + month_to
 
 
-def apply_period_filter(query, model, filters: Dict):
+def apply_period_filter(query, model, filters):
     """Добавляет к запросу условие периода, если он задан."""
     bounds = period_bounds(filters)
     if bounds is None:

@@ -3,6 +3,7 @@ import logging
 from typing import Dict, Optional, Tuple, Any
 from sqlalchemy import func, select
 from controllers.reference_cache import ReferenceDataCache, reference_cache
+from controllers.report_filters import ReportFilters
 from db.database import get_session
 from db.models.entities import Airline, Airport, Indicator, AirlineIndicators, AirportIndicators
 from utils.constants import MONTHS_LIST, MODE_AIRLINE
@@ -121,64 +122,60 @@ class FilterController:
         except Exception:
             return 2024, 2025, 1, 12
 
-    def get_current_filters(self, filter_widget) -> Dict:
-        """Собирает фильтры: списки для SQL IN; при одном элементе — также *_id для свода по одной сущности."""
-        filters: Dict[str, Any] = {}
+    def get_current_filters(self, filter_widget) -> ReportFilters:
+        """Собирает отбор со вкладки авиакомпаний.
+
+        Одиночные значения (`airline_id` и прочие) здесь больше не проставляются:
+        они выводятся из списков самим `ReportFilters`, а прежде вычислялись при
+        записи и читались дальше как самостоятельные ключи (ARCH-5).
+        """
+        airline_ids: Tuple[int, ...] = ()
+        airport_ids: Tuple[int, ...] = ()
+        route_types: Tuple[Any, ...] = ()
+        layout = None
 
         if filter_widget.current_mode == MODE_AIRLINE:
             air_ids = filter_widget.get_airline_filter_ids()
             if air_ids is not None:
-                filters["airline_ids"] = [int(x) for x in air_ids]
-                if len(air_ids) == 1:
-                    filters["airline_id"] = int(air_ids[0])
-            lay = filter_widget.get_pivot_table_layout()
-            if lay:
-                filters["pivot_table_layout"] = lay
+                airline_ids = tuple(int(x) for x in air_ids)
+            layout = filter_widget.get_pivot_table_layout() or None
+            rts = filter_widget.get_route_filter_types()
+            if rts is not None:
+                route_types = tuple(rts)
         else:
             ap_ids = filter_widget.get_airport_filter_ids()
             if ap_ids is not None:
-                filters["airport_ids"] = [int(x) for x in ap_ids]
-                if len(ap_ids) == 1:
-                    filters["airport_id"] = int(ap_ids[0])
+                airport_ids = tuple(int(x) for x in ap_ids)
 
-        ind_ids = filter_widget.get_indicator_filter_ids()
-        if ind_ids is not None:
-            filters["indicator_ids"] = [int(x) for x in ind_ids]
-            if len(ind_ids) == 1:
-                filters["indicator_id"] = int(ind_ids[0])
+        return ReportFilters(
+            airline_ids=airline_ids,
+            airport_ids=airport_ids,
+            indicator_ids=self._indicator_ids(filter_widget),
+            route_types=route_types,
+            pivot_table_layout=layout,
+            **self._period(filter_widget),
+        )
 
-        bounds = period_from_widget(filter_widget)
-        if bounds is not None:
-            filters["period_from"], filters["period_to"] = bounds
-
-        if filter_widget.current_mode == MODE_AIRLINE:
-            rts = filter_widget.get_route_filter_types()
-            if rts is not None:
-                filters["route_types"] = list(rts)
-                if len(rts) == 1:
-                    filters["route_type"] = rts[0]
-
-        return filters
-
-    def get_airport_tab_filters(self, airport_filter_widget) -> Dict:
-        """Фильтры вкладки «Аэропорты» (форма 15-ГА): один аэропорт из комбобокса."""
-        filters: Dict[str, Any] = {}
+    def get_airport_tab_filters(self, airport_filter_widget) -> ReportFilters:
+        """Отбор вкладки «Аэропорты» (форма 15-ГА): один аэропорт из комбобокса."""
         aid = airport_filter_widget.get_airport_id()
-        if aid is not None:
-            filters["airport_id"] = int(aid)
-            filters["airport_ids"] = [int(aid)]
+        return ReportFilters(
+            airport_ids=() if aid is None else (int(aid),),
+            indicator_ids=self._indicator_ids(airport_filter_widget),
+            **self._period(airport_filter_widget),
+        )
 
-        ind_ids = airport_filter_widget.get_indicator_filter_ids()
-        if ind_ids is not None:
-            filters["indicator_ids"] = [int(x) for x in ind_ids]
-            if len(ind_ids) == 1:
-                filters["indicator_id"] = int(ind_ids[0])
+    @staticmethod
+    def _indicator_ids(widget) -> Tuple[int, ...]:
+        ind_ids = widget.get_indicator_filter_ids()
+        return () if ind_ids is None else tuple(int(x) for x in ind_ids)
 
-        bounds = period_from_widget(airport_filter_widget)
-        if bounds is not None:
-            filters["period_from"], filters["period_to"] = bounds
-
-        return filters
+    @staticmethod
+    def _period(widget) -> Dict[str, Any]:
+        bounds = period_from_widget(widget)
+        if bounds is None:
+            return {}
+        return {"period_from": bounds[0], "period_to": bounds[1]}
 
     def clear_cache(self):
         """Сбрасывает общий кеш справочников — для всех контроллеров сразу."""

@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict, List, Optional, Tuple
 
+from controllers.report_filters import NO_FILTERS
 from utils.constants import MODE_AIRLINE, MONTHS_LIST, MONTHS_RU, VIEW_DETAIL
 
 # Excel запрещает в названии листа : \ / ? * [ ] и больше 31 символа.
@@ -44,11 +45,12 @@ def month_label(number: Optional[int]) -> str:
     return MONTHS_RU[MONTHS_LIST[number - 1]]
 
 
-def period_label(filters: Dict[str, Any]) -> str:
+def period_label(filters) -> str:
     """«Январь 2025» или «Январь 2025 — Март 2025»; пусто, если период не задан."""
-    start, end = filters.get("period_from"), filters.get("period_to")
-    if not start or not end:
+    period = getattr(filters, "period", None)
+    if period is None:
         return ""
+    start, end = period
 
     def one(period) -> str:
         year, month = period
@@ -71,7 +73,7 @@ def build_export_header(
     *,
     mode: int,
     view: str,
-    filters: Optional[Dict[str, Any]] = None,
+    filters=None,
     stats: Optional[Dict[str, Any]] = None,
     user: Optional[str] = None,
     now: Optional[datetime] = None,
@@ -81,7 +83,7 @@ def build_export_header(
     Момент выгрузки передаётся снаружи, а не берётся здесь: иначе содержимое
     книги зависело бы от часов, и проверить его было бы нечем.
     """
-    filters = filters or {}
+    filters = filters if filters is not None else NO_FILTERS
     stats = stats or {}
     now = now or datetime.now()
 
