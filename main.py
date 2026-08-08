@@ -8,7 +8,7 @@ ensure_qt_platform_plugins()
 
 from PyQt6.QtWidgets import QApplication, QMessageBox
 from db.database import init_db
-from forms.auth import Auth
+from forms.app_controller import AppController
 from forms.widgets.account_dialogs import ensure_initial_admin
 from utils.logging_setup import log_path, setup_logging
 from utils.paths import get_app_dir
@@ -31,6 +31,11 @@ def main():
     # упавшая миграция — оставляла пользователя без единого сообщения: показать
     # его было нечем, а трейсбек уходил в несуществующий stdout (BUG-15).
     app = QApplication(sys.argv)
+    # Смена окна входа на главное и обратно проходит через момент, когда открытых
+    # окон нет. С поведением по умолчанию приложение в этот момент завершалось бы,
+    # и переход держался бы лишь на том, что новое окно успевает появиться.
+    # Закрывается программа теперь там, где это решено явно — в AppController.
+    app.setQuitOnLastWindowClosed(False)
 
     try:
         init_db()
@@ -45,8 +50,8 @@ def main():
         log.info("Первичная настройка отменена пользователем")
         sys.exit(0)
 
-    window = Auth()
-    window.show()
+    controller = AppController(app)
+    controller.start()
     sys.exit(app.exec())
 
 

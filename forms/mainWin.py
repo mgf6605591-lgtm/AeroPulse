@@ -12,6 +12,7 @@ from utils.qt_plugins import ensure_qt_platform_plugins
 ensure_qt_platform_plugins()
 
 import logging
+from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QTabWidget,
     QPushButton, QFileDialog, QMessageBox
@@ -35,7 +36,16 @@ log = logging.getLogger(__name__)
 
 
 class MainWindow(QMainWindow):
-    """Главное окно приложения"""
+    """Главное окно приложения.
+
+    О выходе из системы оно только сообщает: окно входа создаёт и показывает
+    владелец жизненного цикла (`forms.app_controller`). Прежде главное окно
+    заводило новое окно входа само и клало его в своё поле, будучи уже
+    закрытым, — так и набирались «мёртвые» окна на каждом входе-выходе (BUG-8).
+    """
+
+    logout_requested = pyqtSignal()
+    closed = pyqtSignal()
 
     def __init__(self, current_user):
         super().__init__()
@@ -338,17 +348,23 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Ошибка", f"Ошибка удаления: {e}")
 
     def logout_action(self):
-        """Выход из системы"""
+        """Выход из системы: вернуться к окну входа, не закрывая программу."""
         reply = QMessageBox.question(
             self, 'Подтверждение выхода',
             'Вы действительно хотите выйти из системы?',
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
         if reply == QMessageBox.StandardButton.Yes:
-            self.close()
-            from forms.auth import Auth
-            self.auth_window = Auth()
-            self.auth_window.show()
+            self.logout_requested.emit()
+
+    def closeEvent(self, event):
+        """Закрытие окна крестиком — это закрытие программы.
+
+        Отличить его от закрытия при выходе из системы может только владелец
+        окон: он один знает, что смена окон сейчас идёт.
+        """
+        super().closeEvent(event)
+        self.closed.emit()
 
 
 if __name__ == "__main__":

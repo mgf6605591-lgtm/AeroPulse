@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from PyQt6 import uic
+from PyQt6.QtCore import pyqtSignal
 from PyQt6.QtWidgets import QDialog, QLineEdit, QMainWindow, QMessageBox
 from forms.widgets.account_dialogs import PasswordChangeDialog
 from services.auth_service import auth_service
@@ -8,6 +9,16 @@ from utils.paths import get_app_dir, resource_path
 
 
 class Auth(QMainWindow):
+    """Окно входа.
+
+    Об учётной записи оно только сообщает: главное окно строит и показывает
+    владелец жизненного цикла (`forms.app_controller`). Прежде окно входа
+    создавало главное само и держало его в своём поле — уже закрытым (BUG-8).
+    """
+
+    logged_in = pyqtSignal(object)
+    closed = pyqtSignal()
+
     def __init__(self):
         super().__init__()
 
@@ -65,10 +76,8 @@ class Auth(QMainWindow):
                 return
             account = dialog.account
 
-        self.close()
-        self.open_main_window(account)
+        self.logged_in.emit(account)
 
-    def open_main_window(self, user):
-        from forms.mainWin import MainWindow
-        self.main_window = MainWindow(user)
-        self.main_window.show()
+    def closeEvent(self, event):
+        super().closeEvent(event)
+        self.closed.emit()
