@@ -8,6 +8,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font
 from openpyxl.utils import get_column_letter
 
+from controllers.export_header import ExportHeader
 from forms.models.roles import RAW_VALUE_ROLE
 
 
@@ -70,11 +71,34 @@ class ExportController:
         return cell
 
     @staticmethod
+    def _write_header(ws, header: Optional[ExportHeader]) -> int:
+        """Пишет шапку отчёта и возвращает номер строки, с которой идёт таблица.
+
+        Без шапки книга получалась обезличенной: ни предприятия, ни периода, а
+        лист назывался «Данные» (FUNC-4). Между шапкой и таблицей остаётся пустая
+        строка — она же граница для автофильтра и для взгляда.
+        """
+        if header is None or not header.lines:
+            return 1
+
+        ws.title = header.sheet_title
+        label_font = Font(bold=True)
+        for offset, (label, value) in enumerate(header.lines):
+            ws.cell(row=offset + 1, column=1, value=f"{label}:").font = label_font
+            # Значение пишется текстом сознательно: это подпись отчёта, а не
+            # величина, и превращать «12-ГА» в дату или число Excel не должен.
+            cell = ws.cell(row=offset + 1, column=2, value=str(value))
+            cell.data_type = "s"
+
+        return len(header.lines) + 2
+
+    @staticmethod
     def export_to_excel(
         table_view: QTableView,
         file_path: str,
         parent=None,
         header_groups: Optional[List[Tuple[int, int, str]]] = None,
+        header: Optional[ExportHeader] = None,
     ) -> bool:
         try:
             model = table_view.model()
@@ -92,6 +116,9 @@ class ExportController:
             center = Alignment(horizontal="center", vertical="center", wrap_text=True)
             hdr_font = Font(bold=True)
 
+            # Заголовки таблицы начинаются под шапкой, а не с первой строки.
+            top = ExportController._write_header(ws, header)
+            header_rows = (top, top + 1) if groups else (top,)
             data_start_row: int
 
             if groups:
@@ -106,12 +133,12 @@ class ExportController:
                         continue
                     c1, c2 = first + 1, last + 1
                     if c1 == c2:
-                        cell = ws.cell(row=1, column=c1, value=label or "")
+                        cell = ws.cell(row=top, column=c1, value=label or "")
                     else:
                         ws.merge_cells(
-                            start_row=1, start_column=c1, end_row=1, end_column=c2
+                            start_row=top, start_column=c1, end_row=top, end_column=c2
                         )
-                        cell = ws.cell(row=1, column=c1, value=label or "")
+                        cell = ws.cell(row=top, column=c1, value=label or "")
                     cell.alignment = center
                     cell.font = hdr_font
 
@@ -120,9 +147,9 @@ class ExportController:
                     if c in in_group:
                         continue
                     c1 = c + 1
-                    ws.merge_cells(start_row=1, start_column=c1, end_row=2, end_column=c1)
+                    ws.merge_cells(start_row=top, start_column=c1, end_row=top + 1, end_column=c1)
                     h = model.headerData(c, Qt.Orientation.Horizontal, Qt.ItemDataRole.DisplayRole)
-                    cell = ws.cell(row=1, column=c1, value="" if h is None else str(h))
+                    cell = ws.cell(row=top, column=c1, value="" if h is None else str(h))
                     cell.alignment = center
                     cell.font = hdr_font
 
@@ -131,18 +158,18 @@ class ExportController:
                     if c not in in_group:
                         continue
                     h = model.headerData(c, Qt.Orientation.Horizontal, Qt.ItemDataRole.DisplayRole)
-                    cell = ws.cell(row=2, column=c + 1, value="" if h is None else str(h))
+                    cell = ws.cell(row=top + 1, column=c + 1, value="" if h is None else str(h))
                     cell.alignment = center
                     cell.font = hdr_font
 
-                data_start_row = 3
+                data_start_row = top + 2
             else:
                 for c in range(ncols):
                     h = model.headerData(c, Qt.Orientation.Horizontal, Qt.ItemDataRole.DisplayRole)
-                    cell = ws.cell(row=1, column=c + 1, value="" if h is None else str(h))
+                    cell = ws.cell(row=top, column=c + 1, value="" if h is None else str(h))
                     cell.alignment = center
                     cell.font = hdr_font
-                data_start_row = 2
+                data_start_row = top + 1
 
             for r in range(nrows):
                 excel_row = data_start_row + r
@@ -154,7 +181,7 @@ class ExportController:
             for c in range(ncols):
                 letter = get_column_letter(c + 1)
                 max_len = 10
-                for check_row in (1, 2) if groups else (1,):
+                for check_row in header_rows:
                     v = ws.cell(row=check_row, column=c + 1).value
                     if v is not None:
                         max_len = max(max_len, min(60, len(str(v))))

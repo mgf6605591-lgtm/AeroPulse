@@ -293,6 +293,7 @@ class MainWindow(QMainWindow):
             file_path,
             self,
             header_groups=groups,
+            header=tw.export_header(user=getattr(self.current_user, "username", None)),
         )
 
     def delete_records(self, ids_to_delete: list):

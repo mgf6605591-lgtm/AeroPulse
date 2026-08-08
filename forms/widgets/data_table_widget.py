@@ -6,6 +6,7 @@ from forms.models.sqlalchemy_table_model import SQLAlchemyTableModel
 from forms.models.pivot_dict_model import PivotDictModel
 from forms.widgets.multilevel_header import MultiLevelHeaderView
 from controllers.data_controller import DataController
+from controllers.export_header import ExportHeader, build_export_header
 from utils.constants import GA12_TOTAL_HEADER, ROUTE_TYPE_NAMES, VIEW_PIVOT, VIEW_DETAIL
 
 
@@ -19,6 +20,11 @@ class DataTableWidget(QWidget):
         self.current_view = VIEW_PIVOT
         self.current_mode = 1  # MODE_AIRLINE
         self.data_controller = DataController()
+        # Чем описать выгрузку, знает тот, кто загрузил данные. Экран показывает
+        # предприятие и период в строке под таблицей, а в файл они не попадали
+        # вовсе (FUNC-4) — теперь показанное запоминается для шапки книги.
+        self._last_filters: dict = {}
+        self._last_stats: dict = {}
         self._init_ui()
         self._setup_models()
     
@@ -220,12 +226,15 @@ class DataTableWidget(QWidget):
         elif filters.get("airport_ids") and len(filters["airport_ids"]) == 1:
             entity_id = filters["airport_ids"][0]
         
+        self._last_filters = dict(filters or {})
+
         if self.current_view == VIEW_PIVOT:
             data = self.data_controller.load_pivot_data(mode, filters, entity_id)
             self.pivot_model.set_source_data(data['rows'], data['headers'], data['keys'])
             self.grouped_header.set_groups(data['groups'])
             
             stats = data['stats']
+            self._last_stats = dict(stats)
             if 'airline_name' in stats:
                 self.data_count_label.setText(
                     f"{stats['airline_name']} — показателей: {stats['indicators']}, месяцев: {stats['months']}"
@@ -261,6 +270,8 @@ class DataTableWidget(QWidget):
             self.detail_model.setColumnAttributes(data['attrs'])
             self.detail_model.set_source_data(data['records'])
             self.grouped_header.set_groups([])
+            # У подробной таблицы своего свода нет: считаем то, что в ней лежит.
+            self._last_stats = {"records": len(data['records'])}
             self.data_count_label.setText(f"Записей: {len(data['records'])}")
             
             # Установка ширины столбцов для подробной таблицы
@@ -273,6 +284,16 @@ class DataTableWidget(QWidget):
     def get_header_groups_for_export(self) -> list:
         """Группы заголовка (как на экране) для экспорта; для сводной таблицы с группами месяцев."""
         return self.grouped_header.get_groups()
+
+    def export_header(self, user: str = None) -> ExportHeader:
+        """Шапка книги: форма, предприятие, период, счётчики, момент выгрузки."""
+        return build_export_header(
+            mode=self.current_mode,
+            view=self.current_view,
+            filters=self._last_filters,
+            stats=self._last_stats,
+            user=user,
+        )
     
     def set_parent_window(self, parent):
         """Устанавливает родительское окно для доступа к методам"""
