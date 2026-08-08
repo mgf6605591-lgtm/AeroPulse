@@ -55,8 +55,14 @@ GA15_HEADER_GROUPS: List[Tuple[int, int, str]] = [
 GA15_KEYS: List[str] = [f"ga15_{i}" for i in range(13)]
 
 
+# В бланке 15-ГА в неприменимых графах напечатана «Х» — кириллическая, как в
+# самой форме. Это значит «показатель здесь не заполняется», а не «данных нет»:
+# отсутствие данных в заполняемой графе — это ноль (BUG-30).
+GA15_NOT_FILLED = "Х"
+
+
 class Ga15RowSpec:
-    __slots__ = ("kind", "title", "line_display", "row_code")
+    __slots__ = ("kind", "title", "line_display", "row_code", "not_filled")
 
     def __init__(
         self,
@@ -64,15 +70,18 @@ class Ga15RowSpec:
         title: str,
         line_display: Optional[Any] = None,
         row_code: Optional[str] = None,
+        not_filled: Tuple[str, ...] = (),
     ):
         """
         kind: section | subheading | subdetail | data | filler | footer
         row_code: суффикс для кодов показателей 15ГА-{row_code}-{METRIC}; None — строка без числовых данных
+        not_filled: метки метрик, у которых в бланке напечатана «Х»
         """
         self.kind = kind
         self.title = title
         self.line_display = line_display
         self.row_code = row_code
+        self.not_filled = frozenset(not_filled)
 
 
 # Строки листа «15-ГА» (без служебных блоков подписей внизу)
@@ -96,5 +105,15 @@ GA15_TABLE_ROWS: List[Ga15RowSpec] = [
         8,
         "R08",
     ),
-    Ga15RowSpec("data", "Все прочие операции", 9, "R09"),
+    # Строка 09: в бланке заполняется только количество ВС, в графах 4…13 стоит
+    # «Х». Перечень взят из настоящей формы, а не выведен из общего правила:
+    # прежде «Х» подставлялась во все одиннадцать граф, включая количество ВС,
+    # где должно стоять число (BUG-30).
+    Ga15RowSpec(
+        "data",
+        "Все прочие операции",
+        9,
+        "R09",
+        not_filled=tuple(tag for tag in GA15_METRIC_TAGS if tag != "ВС"),
+    ),
 ]

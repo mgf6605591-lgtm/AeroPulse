@@ -31,6 +31,7 @@ from utils.ga15_airport_layout import (
     GA15_FLAT_HEADERS,
     GA15_HEADER_GROUPS,
     GA15_KEYS,
+    GA15_NOT_FILLED,
     GA15_TABLE_ROWS,
 )
 
@@ -897,11 +898,15 @@ class DataController:
                 if rc:
                     for j, tag in enumerate(GA15_METRIC_TAGS):
                         ci = 2 + j
+                        # «Х» — свойство графы бланка, а не признак отсутствия
+                        # данных: в заполняемой графе отсутствие данных — ноль.
+                        # Прежде вся строка 09 выводилась как «Х», хотя количество
+                        # ВС в ней заполняется (BUG-30).
+                        if tag in spec.not_filled:
+                            row[GA15_KEYS[ci]] = GA15_NOT_FILLED
+                            continue
                         total, found = _ga15_sum_metric(agg, rc, tag)
-                        if rc == "R09":
-                            row[GA15_KEYS[ci]] = _dec_to_float(total) if found else "Х"
-                        else:
-                            row[GA15_KEYS[ci]] = _dec_to_float(total) if found else 0.0
+                        row[GA15_KEYS[ci]] = _dec_to_float(total) if found else 0.0
             pivot_rows.append(row)
 
         n_data_lines = sum(

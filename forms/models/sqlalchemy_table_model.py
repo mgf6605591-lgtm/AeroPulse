@@ -98,8 +98,10 @@ class SQLAlchemyTableModel(QAbstractTableModel):
                 return format_number_ru(value)
             return str(value)
 
-        # ToolTipRole
-        if value:
+        # ToolTipRole. Сравнение именно с None: `if value` считает ложью и ноль, и
+        # `Decimal('0')` — а ноль в отчётности не редкость, а норма, и подсказка
+        # пропадала как раз у него (BUG-29).
+        if value is not None:
             return f"{self._headers[col]}: {value}"
         return None
 
