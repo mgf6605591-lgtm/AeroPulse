@@ -1,20 +1,40 @@
 from decimal import Decimal
 from typing import List, Optional
 
-from sqlalchemy.orm import Mapped, mapped_column, relationship, declarative_base
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String
 from datetime import datetime
 from db.models.enums import RouteType, UserPosition, ShippingRegularity, Months
 from db.models.types import ExactDecimal, MonthNumber
 
-Base = declarative_base()
+# Длина текстовых полей выбрана по данным, а не на глаз (SCH-6). Прежние лимиты
+# реальную отчётность не вмещали: самое длинное название показателя, которое
+# порождает разбор 15-ГА, — 82 символа при объявленных пятидесяти, а код формы
+# «15ГА-R04ИНО-ПАС_ВСЕГО» — 21 при двадцати. SQLite длины не проверяет, поэтому
+# на нём это ничем себя не выдавало; на PostgreSQL или MSSQL импорт 15-ГА упал бы
+# на первой же строке.
+NAME_LENGTH = 255
+CODE_LENGTH = 64
+# RFC 5321: 64 символа локальной части, точка, 255 доменной.
+EMAIL_LENGTH = 320
+
+
+class Base(DeclarativeBase):
+    """Общий предок моделей.
+
+    Прежде база создавалась `declarative_base()` — вызовом, оставшимся от
+    SQLAlchemy 1.x, при том что модели уже объявлены через `Mapped[...]` и
+    `mapped_column` (SCH-8). Схема от замены не меняется: за этим следит сверка
+    метаданных с миграциями в `tests/test_migrations.py`.
+    """
+
 
 class User(Base):
     __tablename__ = 'users'
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     username: Mapped[str] = mapped_column(String(50), unique=True)
-    email: Mapped[str] = mapped_column(String(25), unique=True)
+    email: Mapped[str] = mapped_column(String(EMAIL_LENGTH), unique=True)
     position: Mapped[UserPosition]
     # Хеш scrypt в формате utils.passwords, а не сам пароль (SEC-1).
     password_hash: Mapped[str]
@@ -29,7 +49,7 @@ class Airport(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True)
     code: Mapped[str] = mapped_column(String(5), unique=True)
-    name: Mapped[str] = mapped_column(String(25))
+    name: Mapped[str] = mapped_column(String(NAME_LENGTH))
     # RESTRICT: правка справочника населённых пунктов не должна стирать отчётность аэропорта
     locality_id: Mapped[int] = mapped_column(ForeignKey('airport_localities.id', ondelete='RESTRICT'))
     locality: Mapped["Locality"] = relationship("Locality", back_populates="airports")
@@ -46,7 +66,7 @@ class Locality(Base):
     __tablename__ = 'airport_localities'
 
     id: Mapped[int] = mapped_column(primary_key=True, unique=True, autoincrement=True)
-    name: Mapped[str] = mapped_column(String(50), unique=True)
+    name: Mapped[str] = mapped_column(String(NAME_LENGTH), unique=True)
 
     # Без каскада: удаление населённого пункта с аэропортами запрещает БД (ondelete='RESTRICT')
     airports = relationship("Airport", back_populates="locality", passive_deletes="all")
@@ -57,7 +77,7 @@ class Airline(Base):
 
     id: Mapped[int] = mapped_column(primary_key=True, unique=True, autoincrement=True)
     code: Mapped[str] = mapped_column(String(5), unique=True)
-    name: Mapped[str] = mapped_column(String(50))
+    name: Mapped[str] = mapped_column(String(NAME_LENGTH))
     # См. Airport.is_active — вывод предприятия из работы без потери истории (SCH-10).
     is_active: Mapped[bool] = mapped_column(Boolean, default=True, server_default='1')
 
@@ -110,8 +130,8 @@ class Indicator(Base):
     __tablename__ = 'indicators'
 
     id: Mapped[int] = mapped_column(primary_key=True, unique=True, autoincrement=True)
-    name: Mapped[str] = mapped_column(String(50))
-    code: Mapped[str] = mapped_column(String(20), unique=True)
+    name: Mapped[str] = mapped_column(String(NAME_LENGTH))
+    code: Mapped[str] = mapped_column(String(CODE_LENGTH), unique=True)
     measure: Mapped[str] = mapped_column(String(20))
     # Детализация показателя (напр. 450пас → родитель 450 «Выполненный тоннокилометраж»)
     parent_id: Mapped[Optional[int]] = mapped_column(ForeignKey('indicators.id', ondelete='SET NULL'), nullable=True)
@@ -166,7 +186,9 @@ class ImportLog(Base):
     source_file: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     entity_type: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     entity_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    entity_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    # Та же длина, что у самого названия: журнал хранит копию, и обрезать её
+    # он не должен — иначе запись о загрузке рассказывает про другое предприятие.
+    entity_name: Mapped[Optional[str]] = mapped_column(String(NAME_LENGTH), nullable=True)
 
     month: Mapped[Optional[Months]] = mapped_column(MonthNumber, nullable=True)
     year: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
