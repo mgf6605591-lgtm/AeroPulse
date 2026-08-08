@@ -12,11 +12,7 @@ from utils.ga12_layout import (
     GA12_ROW_BY_BLANK_NUMBER,
     Ga12Row,
 )
-
-_MONTH_ENUM = [
-    "January", "February", "March", "April", "May", "June",
-    "July", "August", "September", "October", "November", "December",
-]
+from utils.months import month_name
 
 # Признаки бланка 12-ГА. Подписи взяты из раскладки показателей ниже в этом файле;
 # сверить с реальным бланком и при необходимости ужесточить порог — правится здесь,
@@ -217,7 +213,7 @@ class XLSXParser(BaseParser):
     @staticmethod
     def _month_num_to_name(num: int) -> Optional[str]:
         if 1 <= num <= 12:
-            return _MONTH_ENUM[num - 1]
+            return month_name(num)
         return None
 
     @classmethod

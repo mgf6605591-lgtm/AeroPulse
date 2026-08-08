@@ -14,11 +14,7 @@ from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
 from parsers.base_parser import BaseParser
-
-_MONTH_ENUM = [
-    "January", "February", "March", "April", "May", "June",
-    "July", "August", "September", "October", "November", "December",
-]
+from utils.months import month_from_meta_filename, month_from_period
 
 # Код строки XML (f15.xml) → ключ строки в кодах показателей 15ГА-Rxx-...
 F15_XML_ROW_TO_RC: Dict[int, str] = {
@@ -155,7 +151,7 @@ class F15XMLParser(BaseParser):
         else:
             ap_name = ""
 
-        month_res = month or cls._month_from_period(period) or cls._month_from_meta_filename(file_name)
+        month_res = month or month_from_period(period) or month_from_meta_filename(file_name)
         year_res = year if year is not None else file_year
         # Заглушек «январь 2025» здесь нет: неопределённый период возвращается как None,
         # решение принимает вызывающий код (DATA-2).
@@ -174,28 +170,6 @@ class F15XMLParser(BaseParser):
             "year": year_res,
             "indicators": indicators,
         }
-
-    @classmethod
-    def _month_from_period(cls, period: str) -> Optional[str]:
-        if not period or not period.strip().isdigit():
-            return None
-        p = period.strip()
-        if len(p) >= 2:
-            m = int(p[-2:])
-            if 1 <= m <= 12:
-                return _MONTH_ENUM[m - 1]
-        return None
-
-    @classmethod
-    def _month_from_meta_filename(cls, path: str) -> Optional[str]:
-        import re
-
-        m = re.search(r"_(\d{4})_(\d{2})_", path.replace("\\", "/"))
-        if m:
-            mi = int(m.group(2))
-            if 1 <= mi <= 12:
-                return _MONTH_ENUM[mi - 1]
-        return None
 
     @classmethod
     def _extract_indicators(cls, root: ET.Element) -> List[Dict[str, Any]]:

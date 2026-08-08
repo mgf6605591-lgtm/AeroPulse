@@ -21,11 +21,7 @@ from typing import Any, Dict, List, Optional
 
 from parsers.base_parser import BaseParser
 from utils.ga12_layout import GA12_ROW_BY_XML_ROW
-
-_MONTH_ENUM = [
-    "January", "February", "March", "April", "May", "June",
-    "July", "August", "September", "October", "November", "December",
-]
+from utils.months import month_from_meta_filename, month_from_period
 
 # Коды строк, названия, единицы измерения и раздел — из общей таблицы бланка
 # (utils/ga12_layout.py). Своя копия карты строк здесь и раскладка по индексам
@@ -71,7 +67,7 @@ class XMLParser(BaseParser):
         else:
             airline_name = ""
 
-        month_res = month or cls._month_from_period(period) or cls._month_from_meta_filename(file_name)
+        month_res = month or month_from_period(period) or month_from_meta_filename(file_name)
         year_res = year if year is not None else file_year
         # Заглушек «январь 2025» здесь нет: неопределённый период возвращается как None,
         # решение принимает вызывающий код (DATA-2).
@@ -95,32 +91,6 @@ class XMLParser(BaseParser):
             "indicators": indicators,
             "data_type": "airline",
         }
-
-    @classmethod
-    def _month_from_period(cls, period: str) -> Optional[str]:
-        """
-        Атрибут period у корня XML: последние две цифры — номер месяца 01–12.
-        """
-        if not period or not period.strip().isdigit():
-            return None
-        p = period.strip()
-        if len(p) >= 2:
-            m = int(p[-2:])
-            if 1 <= m <= 12:
-                return _MONTH_ENUM[m - 1]
-        return None
-
-    @classmethod
-    def _month_from_meta_filename(cls, path: str) -> Optional[str]:
-        """Резерв: если в имени файла есть _YYYY_MM_."""
-        import re
-
-        m = re.search(r"_(\d{4})_(\d{2})_", path.replace("\\", "/"))
-        if m:
-            mi = int(m.group(2))
-            if 1 <= mi <= 12:
-                return _MONTH_ENUM[mi - 1]
-        return None
 
     @classmethod
     def _extract_indicators(cls, root: ET.Element) -> List[Dict[str, Any]]:

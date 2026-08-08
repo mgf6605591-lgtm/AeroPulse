@@ -167,17 +167,12 @@ def _ga12_form_sort_key(code: str) -> tuple:
         return (1,) + _okei_sort_key(c)
 
 
-def _pivot_section_header_row(keys: List[str], title: str) -> Dict[str, Any]:
-    row: Dict[str, Any] = {"indicator": f"— {title} —", "measure": ""}
-    if "code" in keys:
-        row["code"] = ""
-    start_fill = 3 if "code" in keys else 2
-    for k in keys[start_fill:]:
-        row[k] = None
-    return row
+def _pivot_text_row(keys: List[str], text: str) -> Dict[str, Any]:
+    """Строка свода без чисел: заголовок раздела или подзаголовок «в том числе».
 
-
-def _pivot_subheading_row(keys: List[str], text: str) -> Dict[str, Any]:
+    Обе строились двумя функциями, отличавшимися только оформлением подписи
+    (ARCH-8). Оформление — дело вызывающего, а пустая строка у них одна.
+    """
     row: Dict[str, Any] = {"indicator": text, "measure": ""}
     if "code" in keys:
         row["code"] = ""
@@ -185,6 +180,16 @@ def _pivot_subheading_row(keys: List[str], text: str) -> Dict[str, Any]:
     for k in keys[start_fill:]:
         row[k] = None
     return row
+
+
+def _pivot_section_header_row(keys: List[str], title: str) -> Dict[str, Any]:
+    return _pivot_text_row(keys, f"— {title} —")
+
+
+
+def _pivot_subheading_row(keys: List[str], text: str) -> Dict[str, Any]:
+    return _pivot_text_row(keys, text)
+
 
 
 def _count_ga12_data_rows(pivot_rows: List[Dict[str, Any]]) -> int:
@@ -927,7 +932,7 @@ class DataController:
 
     def load_detail_data(self, mode: int, filters: ReportFilters) -> Dict[str, Any]:
         """Загружает данные для подробной таблицы"""
-        if mode == 1:  # MODE_AIRLINE
+        if mode == MODE_AIRLINE:
             # Регулярность выводится рядом с типом маршрута: вдвоём они и образуют
             # рейс. Без неё две записи с одним показателем, месяцем и типом
             # маршрута выглядели в таблице одинаково — а удаляют именно отсюда,

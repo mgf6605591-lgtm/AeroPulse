@@ -60,13 +60,13 @@ class MultiLevelHeaderView(QHeaderView):
 
     def paintSection(self, painter: QPainter, rect: QRect, logicalIndex: int):
         if not self._groups or rect.isEmpty():
-            self._paint_standard_section(painter, rect, logicalIndex)
+            self._paint_section(painter, rect, logicalIndex)
             return
 
         group = self._find_group(logicalIndex)
         if group is None:
             # Колонка вне группы — рисуем обычный заголовок на всю высоту
-            self._paint_standard_section(painter, rect, logicalIndex)
+            self._paint_section(painter, rect, logicalIndex)
             return
 
         first, last, label = group
@@ -78,7 +78,7 @@ class MultiLevelHeaderView(QHeaderView):
         )
         
         # Рисуем нижнюю часть
-        self._paint_section_no_hover(painter, lower_rect, logicalIndex)
+        self._paint_section(painter, lower_rect, logicalIndex)
 
         # Подпись группы рисуется при отрисовке **любой** её видимой колонки, а
         # прямоугольник ограничивается видимой областью. Условием была первая
@@ -110,47 +110,24 @@ class MultiLevelHeaderView(QHeaderView):
         )
         return visible if not visible.isEmpty() else None
 
-    def _paint_standard_section(self, painter: QPainter, rect: QRect, logicalIndex: int):
-        """Отрисовка стандартной секции без hover."""
-        # Получаем цвета из палитры
-        palette = self.palette()
-        bg_color = palette.color(QPalette.ColorRole.Button)
-        border_color = palette.color(QPalette.ColorRole.Mid)
-        text_color = palette.color(QPalette.ColorRole.ButtonText)
-        
-        # Рисуем фон
-        painter.fillRect(rect, bg_color)
-        
-        # Рисуем границу
-        painter.setPen(border_color)
-        painter.drawRect(rect.adjusted(0, 0, -1, -1))
-        
-        # Рисуем текст
-        text = self.model().headerData(logicalIndex, Qt.Orientation.Horizontal, 
-                                      Qt.ItemDataRole.DisplayRole)
-        if text:
-            painter.setPen(text_color)
-            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, str(text))
+    def _paint_section(self, painter: QPainter, rect: QRect, logicalIndex: int):
+        """Отрисовка секции заголовка: фон, рамка, подпись колонки.
 
-    def _paint_section_no_hover(self, painter: QPainter, rect: QRect, logicalIndex: int):
-        """Отрисовка секции без hover (для нижней части)."""
+        Метод был один, а копий — две: `_paint_standard_section` для колонки без
+        группы и `_paint_section_no_hover` для нижней половины сгруппированной.
+        Отличались они только именем и комментарием (ARCH-8), а разница между
+        случаями — в прямоугольнике, который передаёт вызывающий.
+        """
         palette = self.palette()
-        bg_color = palette.color(QPalette.ColorRole.Button)
-        border_color = palette.color(QPalette.ColorRole.Mid)
-        text_color = palette.color(QPalette.ColorRole.ButtonText)
-        
-        # Рисуем фон
-        painter.fillRect(rect, bg_color)
-        
-        # Рисуем границу
-        painter.setPen(border_color)
+        painter.fillRect(rect, palette.color(QPalette.ColorRole.Button))
+
+        painter.setPen(palette.color(QPalette.ColorRole.Mid))
         painter.drawRect(rect.adjusted(0, 0, -1, -1))
-        
-        # Рисуем текст
+
         text = self.model().headerData(logicalIndex, Qt.Orientation.Horizontal,
-                                      Qt.ItemDataRole.DisplayRole)
+                                       Qt.ItemDataRole.DisplayRole)
         if text:
-            painter.setPen(text_color)
+            painter.setPen(palette.color(QPalette.ColorRole.ButtonText))
             painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, str(text))
 
     def _paint_group_header(self, painter: QPainter, rect: QRect, label: str):

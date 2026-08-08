@@ -103,7 +103,7 @@ class MainWindow(QMainWindow):
         lay_a.addWidget(self.filter_widget_airline)
         self.table_widget_airline = DataTableWidget()
         self.table_widget_airline.delete_requested.connect(self.delete_records)
-        self.table_widget_airline.set_parent_window(self)
+        self.table_widget_airline.reload_requested.connect(self._reload_airline_tab)
         lay_a.addWidget(self.table_widget_airline)
 
         self.tab_airports = QWidget()
@@ -115,7 +115,7 @@ class MainWindow(QMainWindow):
         lay_p.addWidget(self.airport_filter_widget)
         self.table_widget_airport = DataTableWidget()
         self.table_widget_airport.delete_requested.connect(self.delete_records)
-        self.table_widget_airport.set_parent_window(self)
+        self.table_widget_airport.reload_requested.connect(self._reload_airport_tab)
         lay_p.addWidget(self.table_widget_airport)
 
         layout.addWidget(self.tabs)
@@ -159,13 +159,6 @@ class MainWindow(QMainWindow):
         self.airport_filter_widget.reset_filters()
         self._reload_airport_tab()
 
-    def reload_table_for_widget(self, table_widget: DataTableWidget):
-        """Перезагрузка данных при смене вида таблицы (pivot/detail)."""
-        if table_widget is self.table_widget_airline:
-            self._reload_airline_tab()
-        elif table_widget is self.table_widget_airport:
-            self._reload_airport_tab()
-
     def import_file(self):
         """Импорт одного или нескольких файлов; месяц/год — с листа «Титул» (D13) в каждом файле."""
         paths, _ = QFileDialog.getOpenFileNames(
@@ -180,6 +173,9 @@ class MainWindow(QMainWindow):
         # получал не тот список (FUNC-12).
         opened_for = 'airline' if self.current_mode == MODE_AIRLINE else 'airport'
         dialog = ImportDialog(self)
+        dialog.type_changed.connect(
+            lambda entity_type: self.refresh_entities(entity_type, dialog.entity_combo)
+        )
         dialog.select_type(opened_for)
         # Список заполняется здесь, а не обработчиком смены типа: если нужный тип
         # уже стоит первым, Qt сигнала о смене не шлёт и список остался бы пустым.

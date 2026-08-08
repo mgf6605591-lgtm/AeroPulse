@@ -8,18 +8,28 @@ from forms.widgets.multilevel_header import MultiLevelHeaderView
 from controllers.data_controller import DataController
 from controllers.export_header import ExportHeader, build_export_header
 from controllers.report_filters import NO_FILTERS, ReportFilters
-from utils.constants import GA12_TOTAL_HEADER, ROUTE_TYPE_NAMES, VIEW_PIVOT, VIEW_DETAIL
+from utils.constants import (
+    GA12_TOTAL_HEADER,
+    MODE_AIRLINE,
+    ROUTE_TYPE_NAMES,
+    VIEW_DETAIL,
+    VIEW_PIVOT,
+)
 
 
 class DataTableWidget(QWidget):
     """Виджет таблицы данных"""
     
     delete_requested = pyqtSignal(list)
+    # О смене режима отображения виджет сообщает сигналом, как и об удалении.
+    # Прежде он звал метод родителя напрямую, а зависимость устанавливалась
+    # постфактум через `set_parent_window()` и проверялась `hasattr` (ARCH-10).
+    reload_requested = pyqtSignal()
     
     def __init__(self, parent=None):
         super().__init__(parent)
         self.current_view = VIEW_PIVOT
-        self.current_mode = 1  # MODE_AIRLINE
+        self.current_mode = MODE_AIRLINE
         self.data_controller = DataController()
         # Чем описать выгрузку, знает тот, кто загрузил данные. Экран показывает
         # предприятие и период в строке под таблицей, а в файл они не попадали
@@ -100,8 +110,7 @@ class DataTableWidget(QWidget):
             self.current_view = VIEW_DETAIL
             self.data_table.setModel(self.detail_model)
             self.delete_btn.setEnabled(True)
-        if hasattr(self, "parent_window"):
-            self.parent_window.reload_table_for_widget(self)
+        self.reload_requested.emit()
     
     def _on_context_menu(self, pos):
         """Контекстное меню"""
@@ -252,8 +261,9 @@ class DataTableWidget(QWidget):
                 )
             else:
                 self.data_count_label.setText(
-                    f"Свод {'АК' if mode == 1 else 'аэропортов'} — показателей: {stats['indicators']}, "
-                    f"{'авиакомпаний' if mode == 1 else 'аэропортов'}: {stats.get('airlines', stats.get('airports', 0))}"
+                    f"Свод {'АК' if mode == MODE_AIRLINE else 'аэропортов'} — показателей: {stats['indicators']}, "
+                    f"{'авиакомпаний' if mode == MODE_AIRLINE else 'аэропортов'}: "
+                    f"{stats.get('airlines', stats.get('airports', 0))}"
                 )
             
             # Установка ширины столбцов для сводной таблицы
@@ -289,7 +299,3 @@ class DataTableWidget(QWidget):
             stats=self._last_stats,
             user=user,
         )
-    
-    def set_parent_window(self, parent):
-        """Устанавливает родительское окно для доступа к методам"""
-        self.parent_window = parent

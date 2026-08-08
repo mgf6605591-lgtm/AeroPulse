@@ -1,5 +1,5 @@
 # forms/widgets/import_dialog.py
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QComboBox, QDialog, QDialogButtonBox, QFormLayout, QLabel, QMessageBox
 )
@@ -7,6 +7,11 @@ from PyQt6.QtWidgets import (
 
 class ImportDialog(QDialog):
     """Диалог выбора параметров импорта"""
+
+    # Список предприятий заполняет тот, кто знает про базу. Прежде диалог звал
+    # метод родителя через `hasattr(self, 'parent')` — проверку, истинную у
+    # любого QObject, потому что `parent` это метод (ARCH-10).
+    type_changed = pyqtSignal(str)
     
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -46,12 +51,10 @@ class ImportDialog(QDialog):
         layout.addRow(buttons)
     
     def _on_type_changed(self):
-        """Обработчик изменения типа предприятия"""
+        """Тип сменился: список предприятий устарел и ждёт нового."""
         self.entity_combo.clear()
         self.entity_combo.setEnabled(False)
-        # Сигнал для родительского окна о необходимости обновить список
-        if hasattr(self, 'parent') and hasattr(self.parent(), 'refresh_entities'):
-            self.parent().refresh_entities(self.get_type(), self.entity_combo)
+        self.type_changed.emit(self.get_type())
     
     def select_type(self, entity_type: str) -> None:
         """Ставит тип предприятия — по вкладке, с которой позвали импорт (FUNC-12).

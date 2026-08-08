@@ -12,10 +12,11 @@ from PyQt6.QtCore import pyqtSignal
 from controllers.filter_controller import FilterController
 from forms.widgets.multi_select_filter_button import MultiSelectFilterButton
 from forms.widgets.period_guard import period_is_usable
-from utils.constants import APPLY_CAPTION, APPLY_CAPTION_PENDING, MONTHS_RU, MODE_AIRPORT
+from forms.widgets.period_selector import PeriodSelectorMixin
+from utils.constants import APPLY_CAPTION, MODE_AIRPORT
 
 
-class AirportFilterWidget(QGroupBox):
+class AirportFilterWidget(PeriodSelectorMixin, QGroupBox):
     """Фильтры вкладки аэропортов: один аэропорт из выпадающего списка, показатели, период."""
 
     filters_changed = pyqtSignal()
@@ -58,17 +59,7 @@ class AirportFilterWidget(QGroupBox):
         self.from_year = QComboBox()
         self.to_month = QComboBox()
         self.to_year = QComboBox()
-        for combo in (self.from_month, self.to_month):
-            for key, val in MONTHS_RU.items():
-                combo.addItem(val, key)
-        for combo in (self.from_year, self.to_year):
-            for y in range(2020, 2030):
-                combo.addItem(str(y), y)
-        # Период применяется по кнопке: каждое движение любого из четырёх
-        # комбобоксов перестраивало весь отчёт, включая промежуточные состояния
-        # вроде «с декабря 2025 по январь 2024» (PERF-4).
-        for combo in self._period_combos():
-            combo.currentIndexChanged.connect(self._on_period_changed)
+        self._init_period_combos()
 
         row_period.addWidget(QLabel("Период с:"))
         row_period.addWidget(self.from_month)
@@ -110,39 +101,8 @@ class AirportFilterWidget(QGroupBox):
         if not keep_selection:
             self.indicator_btn.clear_selection()
 
-    def _set_default_period(self):
-        # Умолчание — последний год с данными, а не весь их диапазон: раздельные
-        # колонки по годам (DATA-1) иначе дали бы 24+ колонки при открытии.
-        _, max_year, _, _ = self.filter_controller.get_period_range()
-        # Значения ставит программа: отметка «не применено» тут была бы неправдой.
-        for combo in self._period_combos():
-            combo.blockSignals(True)
-        try:
-            self._set_combo_value(self.from_year, max_year)
-            self._set_combo_value(self.to_year, max_year)
-            self._set_combo_value(self.from_month, "January")
-            self._set_combo_value(self.to_month, "December")
-        finally:
-            for combo in self._period_combos():
-                combo.blockSignals(False)
-        self._clear_pending()
-
-    def _set_combo_value(self, combo: QComboBox, value):
-        for i in range(combo.count()):
-            if combo.itemData(i) == value:
-                combo.setCurrentIndex(i)
-                return
-
-    def _period_combos(self):
-        return (self.from_month, self.from_year, self.to_month, self.to_year)
-
     def _on_filters_changed(self):
         self.filters_changed.emit()
-
-    def _on_period_changed(self):
-        """Период изменён, но не применён: кнопка показывает, что отчёт устарел."""
-        self._period_pending = True
-        self.apply_btn.setText(APPLY_CAPTION_PENDING)
 
     def _on_apply(self):
         # Перевёрнутый период отчёт не перестраивает: пустая таблица без причины
@@ -153,27 +113,11 @@ class AirportFilterWidget(QGroupBox):
         self._clear_pending()
         self.filters_changed.emit()
 
-    def _clear_pending(self):
-        self._period_pending = False
-        self.apply_btn.setText(APPLY_CAPTION)
-
     def get_airport_id(self):
         return self.airport_combo.currentData()
 
     def get_indicator_filter_ids(self):
         return self.indicator_btn.filter_active_ids()
-
-    def get_from_month(self):
-        return self.from_month.currentData()
-
-    def get_from_year(self):
-        return self.from_year.currentData()
-
-    def get_to_month(self):
-        return self.to_month.currentData()
-
-    def get_to_year(self):
-        return self.to_year.currentData()
 
     def reset_filters(self):
         self.airport_combo.setCurrentIndex(0)
