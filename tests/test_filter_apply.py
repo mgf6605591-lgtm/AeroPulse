@@ -123,34 +123,29 @@ class AirportFilterApplyTest(PeriodAppliesByButton, unittest.TestCase):
 class ViewToggleTest(unittest.TestCase):
     """BUG-24: один клик — одна перезагрузка."""
 
-    class ParentSpy:
-        def __init__(self):
-            self.reloads = 0
-
-        def reload_table_for_widget(self, widget):
-            self.reloads += 1
-
     def setUp(self):
         from forms.widgets.data_table_widget import DataTableWidget
 
         self.widget = DataTableWidget()
         self.addCleanup(self.widget.deleteLater)
-        self.parent = self.ParentSpy()
-        self.widget.set_parent_window(self.parent)
+        # О перестроении виджет сообщает сигналом, а не вызовом метода родителя
+        # (ARCH-10): считаем испускания.
+        self.reloads = []
+        self.widget.reload_requested.connect(lambda: self.reloads.append(1))
 
     def test_switching_to_detail_reloads_once(self):
         """Прежде здесь было две перезагрузки: сигнал шёл от обеих кнопок."""
         self.widget.radio_detail.setChecked(True)
 
-        self.assertEqual(1, self.parent.reloads)
+        self.assertEqual(1, len(self.reloads))
 
     def test_switching_back_reloads_once(self):
         self.widget.radio_detail.setChecked(True)
-        self.parent.reloads = 0
+        self.reloads.clear()
 
         self.widget.radio_pivot.setChecked(True)
 
-        self.assertEqual(1, self.parent.reloads)
+        self.assertEqual(1, len(self.reloads))
 
     def test_view_and_delete_button_follow_the_mode(self):
         from utils.constants import VIEW_DETAIL, VIEW_PIVOT
