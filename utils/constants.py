@@ -32,11 +32,11 @@ ROUTE_TYPE_NAMES = {
 # Итоговая колонка бланка — «ИТОГО гр.4+гр.5+гр.6».
 GA12_TOTAL_HEADER = 'ИТОГО'
 
-REGULARITY_ORDER = [
-    'Регулярные коммерческие',
-    'Не регулярные коммерческие',
-    'Не коммерческие',
-]
+# Порядок разделов свода — ключи разделов бланка, они же имена членов
+# ShippingRegularity. Прежде здесь стоял список русских подписей, набранный
+# руками, а соседние словари выводились из перечисления: переименование подписи
+# рассогласовало бы их молча, и раздел стал бы пустым без единой ошибки (ARCH-6).
+REGULARITY_ORDER = list(GA12_SECTION_ORDER)
 
 # Раскладка 12-ГА ниже целиком выведена из utils/ga12_layout.py — там описана
 # каждая строка бланка. Прежде списки кодов были набраны здесь руками, а разделы
@@ -44,22 +44,22 @@ REGULARITY_ORDER = [
 # любой строки требовала пересчитать границы, и они разошлись с самой формой.
 GA12_CODE_ORDER_FLAT = list(GA12_CODES_FLAT)
 
-# Ключи разделов на экране — значения ShippingRegularity: в этом виде раздел
-# приходит из БД вместе с перевозкой.
-_SECTION_LABEL = {key: ShippingRegularity[key].value for key in GA12_SECTION_ORDER}
+# Раздел ключуется именем члена перечисления, а не русской подписью: подпись —
+# то, что видит человек, и менять её должно быть безопасно (ARCH-6). Проверка,
+# что имена разделов бланка и члены ShippingRegularity не разошлись, стоит здесь
+# же: разойдясь, они дали бы пустые разделы, а не ошибку.
+_UNKNOWN_SECTIONS = [key for key in GA12_SECTION_ORDER if key not in ShippingRegularity.__members__]
+if _UNKNOWN_SECTIONS:
+    raise RuntimeError(
+        "Разделы бланка 12-ГА разошлись с ShippingRegularity: "
+        + ", ".join(_UNKNOWN_SECTIONS)
+    )
 
-GA12_REGULAR_CODES = list(GA12_CODES_BY_SECTION_KEY['regular'])
-GA12_IRREGULAR_CODES = list(GA12_CODES_BY_SECTION_KEY['irregular'])
-GA12_NONCOMMERCIAL_CODES = list(GA12_CODES_BY_SECTION_KEY['non_commercial'])
+# Заголовки разделов на экране (как в типовом бланке) и коды строк каждого —
+# по ключу раздела. Прежде оба словаря перекладывались на русские подписи.
+GA12_SECTION_TITLE = dict(GA12_SECTION_HEADINGS)
 
-# Заголовки разделов на экране (как в типовом бланке)
-GA12_SECTION_TITLE = {
-    _SECTION_LABEL[key]: title for key, title in GA12_SECTION_HEADINGS.items()
-}
-
-GA12_CODES_BY_SECTION = {
-    _SECTION_LABEL[key]: list(codes) for key, codes in GA12_CODES_BY_SECTION_KEY.items()
-}
+GA12_CODES_BY_SECTION = {key: list(codes) for key, codes in GA12_CODES_BY_SECTION_KEY.items()}
 
 # Перед детализацией тонно-км (после строки 450) — как в бланке
 GA12_SUBHEADING_VTOM = '      в том числе:'

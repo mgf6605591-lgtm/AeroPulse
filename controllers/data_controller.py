@@ -346,14 +346,23 @@ def _norm_route_type(rt) -> str:
 
 
 def _norm_regularity(reg) -> str:
-    """То же значение, что в REGULARITY_ORDER (русская подпись раздела)."""
+    """Имя члена ShippingRegularity (regular, irregular, …) — ключ раздела свода.
+
+    Возвращалась русская подпись (`.value`), и ею же ключевались словари
+    агрегации, порядок разделов и списки кодов. Правка подписи — например
+    «Не регулярные» на «Нерегулярные» — рассогласовала бы их молча: записи
+    перестали бы попадать в раздел, и он стал бы пустым без единой ошибки
+    (ARCH-6). Соседний `_norm_route_type` всегда возвращал имя члена; теперь
+    соглашение одно на оба.
+    """
     if isinstance(reg, ShippingRegularity):
-        return reg.value
+        return reg.name
     if isinstance(reg, str):
+        s = reg.strip()
         for e in ShippingRegularity:
-            if e.name == reg or e.value == reg:
-                return e.value
-    return str(reg)
+            if e.name == s or e.value == s:
+                return e.name
+    return str(reg).strip()
 
 
 class DataController:
