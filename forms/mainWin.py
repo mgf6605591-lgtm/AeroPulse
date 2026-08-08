@@ -14,9 +14,8 @@ ensure_qt_platform_plugins()
 import logging
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QTabWidget,
-    QPushButton, QFileDialog, QMessageBox, QApplication
+    QPushButton, QFileDialog, QMessageBox
 )
-from PyQt6.QtCore import Qt
 from db.backup import make_backup
 from db.database import db_path, get_session
 from db.models.entities import AirlineIndicators, AirportIndicators
@@ -28,8 +27,8 @@ from forms.widgets.filter_widget import FilterWidget
 from forms.widgets.airport_filter_widget import AirportFilterWidget
 from forms.widgets.data_table_widget import DataTableWidget
 from forms.widgets.import_dialog import ImportDialog
-from forms.widgets.period_dialog import PeriodDialog
 from forms.widgets.reference_dialog import ReferenceDialog
+from forms.import_runner import ImportRunner
 from utils.constants import MONTHS_RU, MODE_AIRLINE, MODE_AIRPORT
 
 log = logging.getLogger(__name__)
@@ -44,6 +43,7 @@ class MainWindow(QMainWindow):
         self.current_mode = MODE_AIRLINE
         self.filter_controller = FilterController()
         self.export_controller = ExportController()
+        self._import_runner = None
 
         self.setWindowTitle(f"Система учета статистических данных — {current_user.username}")
         self.setMinimumSize(1200, 750)
@@ -190,60 +190,61 @@ class MainWindow(QMainWindow):
         except Exception:
             log.exception("Не удалось снять копию базы")
 
-        try:
-            QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-            report_lines = []
-            any_success = False
-            for file_path in paths:
-                result = ImportService.import_file(
-                    file_path,
-                    entity_type=entity_type,
-                    entity_id=entity_id,
-                    month=None,
-                    year=None,
+        # Разбор и запись уходят в рабочий поток: на пачке файлов окно
+        # переставало перерисовываться и помечалось как «Не отвечает» (BUG-11).
+        # Раннер держится в поле, иначе его соберёт сборщик мусора на первом же
+        # возврате из этого метода — вместе с потоком.
+        self._import_runner = ImportRunner(paths, entity_type, entity_id, parent=self)
+        self._import_runner.finished.connect(
+            lambda results, cancelled: self._on_import_finished(
+                results, cancelled, import_backup
+            )
+        )
+        self._import_runner.start()
+
+    def _on_import_finished(self, results: list, cancelled: bool, import_backup) -> None:
+        """Отчёт о пакете: по строке на файл, копия базы и признак отмены."""
+        runner, self._import_runner = self._import_runner, None
+        if runner is not None:
+            runner.deleteLater()
+
+        report_lines = []
+        any_success = False
+        for result in results:
+            base_name = result.get("source_file") or "?"
+            pm = result.get("period_month")
+            py = result.get("period_year")
+            month_label = MONTHS_RU.get(pm, pm) if pm else "?"
+            period = f"{month_label} {py}" if py else str(month_label)
+
+            if result.get("success"):
+                any_success = True
+                sheet = result.get("sheet_name")
+                where = f", лист «{sheet}»" if sheet else ""
+                report_lines.append(
+                    f"OK — {base_name} ({period}{where}): {result.get('message', '')}"
+                )
+            else:
+                report_lines.append(
+                    f"Ошибка — {base_name}: {result.get('message', 'Неизвестная ошибка')}"
                 )
 
-                # Период не прочитался — спрашиваем его у пользователя вместо
-                # прежней молчаливой подстановки «январь 2025» (DATA-2).
-                if result.get("period_required"):
-                    result = self._import_with_asked_period(
-                        file_path, entity_type, entity_id, result
-                    )
+        report = "\n".join(report_lines)
+        if cancelled:
+            # Отмена срабатывает между файлами, поэтому загруженное остаётся
+            # загруженным — сказать об этом надо прямо.
+            head = f"Импорт прерван. Обработано файлов: {len(results)}."
+            report = f"{head}\n\n{report}" if report else head
+        if import_backup:
+            report += f"\n\nКопия базы перед импортом: {import_backup.name}"
 
-                base_name = result.get("source_file") or Path(file_path).name
-                pm = result.get("period_month")
-                py = result.get("period_year")
-                month_label = MONTHS_RU.get(pm, pm) if pm else "?"
-                period = f"{month_label} {py}" if py else str(month_label)
-
-                if result.get("success"):
-                    any_success = True
-                    sheet = result.get("sheet_name")
-                    where = f", лист «{sheet}»" if sheet else ""
-                    report_lines.append(
-                        f"OK — {base_name} ({period}{where}): {result.get('message', '')}"
-                    )
-                else:
-                    report_lines.append(
-                        f"Ошибка — {base_name}: {result.get('message', 'Неизвестная ошибка')}"
-                    )
-
-            QApplication.restoreOverrideCursor()
-
-            report = "\n".join(report_lines)
-            if import_backup:
-                report += f"\n\nКопия базы перед импортом: {import_backup.name}"
-            if any_success:
-                QMessageBox.information(self, "Импорт завершён", report)
-                self._reload_reference_lists()
-                self._load_initial_data()
-            else:
-                QMessageBox.warning(self, "Импорт не выполнен", report)
-
-        except Exception as e:
-            QApplication.restoreOverrideCursor()
-            log.exception("Импорт не выполнен")
-            QMessageBox.critical(self, "Ошибка импорта", str(e))
+        if any_success:
+            title = "Импорт прерван" if cancelled else "Импорт завершён"
+            QMessageBox.information(self, title, report)
+            self._reload_reference_lists()
+            self._load_initial_data()
+        else:
+            QMessageBox.warning(self, "Импорт не выполнен", report)
 
     def open_references(self):
         """Окно ведения справочников.
@@ -254,37 +255,6 @@ class MainWindow(QMainWindow):
         ReferenceDialog(self).exec()
         self._reload_reference_lists()
         self._load_initial_data()
-
-    def _import_with_asked_period(self, file_path, entity_type, entity_id, result: dict) -> dict:
-        """Спрашивает период у пользователя и повторяет импорт файла.
-
-        Курсор ожидания снимается на время диалога: он выставлен на весь пакет,
-        а здесь управление возвращается человеку.
-        """
-        QApplication.restoreOverrideCursor()
-        dialog = PeriodDialog(
-            Path(file_path).name,
-            month=result.get("period_month"),
-            year=result.get("period_year"),
-            parent=self,
-        )
-        accepted = dialog.exec() == PeriodDialog.DialogCode.Accepted
-        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
-
-        if not accepted:
-            return {
-                "success": False,
-                "message": "Файл пропущен: отчётный период не указан.",
-                "source_file": Path(file_path).name,
-            }
-
-        return ImportService.import_file(
-            file_path,
-            entity_type=entity_type,
-            entity_id=entity_id,
-            month=dialog.get_month(),
-            year=dialog.get_year(),
-        )
 
     def refresh_entities(self, entity_type: str, combo_box):
         """Обновляет список предприятий в диалоге"""
