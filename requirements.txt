@@ -1,18 +1,29 @@
+# Версии закреплены целиком, вместе с зависимостями зависимостей: приложение
+# поставляется собранным exe, и «работает у меня» должно означать «работает у
+# получателя». Ниже помечено, что откуда берётся, — чтобы следующая ревизия не
+# вычищала по grep то, что не импортируется напрямую (INFRA-4).
+
+# --- то, что приложение импортирует само ---
 alembic==1.18.3
-greenlet==3.3.1
-lxml==6.0.2
-Mako==1.3.10
-MarkupSafe==3.0.3
-numpy==2.4.3
+openpyxl==3.1.5
 pandas==3.0.1
 PyQt6==6.10.2
-PyQt6-Qt6==6.10.2
-PyQt6_sip==13.11.0
-python-dateutil==2.9.0.post0
-six==1.17.0
 SQLAlchemy==2.0.46
-typing_extensions==4.15.0
-tzdata==2025.3
-openpyxl==3.1.5
+
+# Движок pandas для книг .xls. В коде не упоминается ни разу: формат выбирает
+# сама pandas — .xlsx читает openpyxl, .xls читает xlrd. Импорт файла принимает
+# оба (services/parse_service.py), так что убрать его — значит отнять .xls.
 xlrd==2.0.1
-scikit-learn==1.6.1
+
+# --- подтягиваются перечисленным выше ---
+greenlet==3.3.1          # SQLAlchemy
+lxml==6.0.2              # pandas: чтение XML
+Mako==1.3.10             # alembic: шаблоны ревизий
+MarkupSafe==3.0.3        # Mako
+numpy==2.4.3             # pandas
+PyQt6-Qt6==6.10.2        # PyQt6: сама библиотека Qt
+PyQt6_sip==13.11.0       # PyQt6
+python-dateutil==2.9.0.post0  # pandas
+six==1.17.0              # python-dateutil
+typing_extensions==4.15.0
+tzdata==2025.3           # pandas: часовые пояса

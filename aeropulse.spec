@@ -38,9 +38,11 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    # Тяжёлые зависимости, которые в приложении не используются. scikit-learn
-    # числится в requirements.txt (INFRA-4) и тянет в сборку десятки мегабайт.
-    excludes=["scikit-learn", "sklearn", "matplotlib", "tkinter", "pytest"],
+    # Тяжёлые пакеты, которые приложению не нужны, но могут оказаться в окружении
+    # сборки и уехать в дистрибутив. scikit-learn отсюда убран вместе с самой
+    # зависимостью: он числился в requirements.txt, не используясь ни разу, и
+    # тянул в сборку десятки мегабайт (INFRA-4).
+    excludes=["matplotlib", "tkinter", "pytest"],
     noarchive=False,
 )
 
