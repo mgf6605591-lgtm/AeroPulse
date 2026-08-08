@@ -95,8 +95,7 @@ class AirportFilterWidget(QGroupBox):
             self.airport_combo.clear()
             self.airport_combo.addItem("— выберите аэропорт —", None)
             for eid, label in entities:
-                if eid is not None:
-                    self.airport_combo.addItem(label, int(eid))
+                self.airport_combo.addItem(label, int(eid))
             if current is not None:
                 for i in range(self.airport_combo.count()):
                     if self.airport_combo.itemData(i) == current:
@@ -106,10 +105,8 @@ class AirportFilterWidget(QGroupBox):
             self.airport_combo.blockSignals(False)
 
     def _load_indicators(self, keep_selection: bool = False):
-        indicators = self.filter_controller.load_indicators()
-        items = [(iid, label) for iid, label in indicators if iid is not None]
         # set_items оставляет из выбора только то, что есть в новом списке.
-        self.indicator_btn.set_items(items)
+        self.indicator_btn.set_items(self.filter_controller.load_indicators())
         if not keep_selection:
             self.indicator_btn.clear_selection()
 

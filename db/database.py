@@ -52,12 +52,23 @@ def db_path() -> Path:
     return _db_path
 
 
+# Одна фабрика на приложение. Прежде `sessionmaker` создавался заново при каждом
+# обращении к `get_session()` — на каждый список фильтра, каждую строку импорта,
+# каждую перезагрузку отчёта (PERF-5).
+_session_factory = sessionmaker(bind=engine, expire_on_commit=False)
+
+
 @contextmanager
 def get_session():
-    Session_local = sessionmaker(bind=engine, expire_on_commit=False)
-    session = Session_local()
+    session = _session_factory()
     try:
         yield session
+    except Exception:
+        # `close()` откатывает незавершённую транзакцию и сам — проверено, — так
+        # что дело не в целостности данных: откат здесь стоит затем, чтобы
+        # намерение читалось на месте, а не выводилось из документации SQLAlchemy.
+        session.rollback()
+        raise
     finally:
         session.close()
 

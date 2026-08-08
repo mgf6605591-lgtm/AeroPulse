@@ -1,7 +1,7 @@
 # controllers/filter_controller.py
 import logging
 from typing import Dict, Optional, Tuple, Any
-from sqlalchemy import func
+from sqlalchemy import func, select
 from controllers.reference_cache import ReferenceDataCache, reference_cache
 from db.database import get_session
 from db.models.entities import Airline, Airport, Indicator, AirlineIndicators, AirportIndicators
@@ -61,41 +61,22 @@ class FilterController:
                 # Только действующие предприятия. Выведенное из работы уходит из
                 # списков выбора, но его отчётность остаётся в базе и в отчётах за
                 # прошлые периоды — в этом и смысл флага вместо удаления (SCH-10).
-                if mode == MODE_AIRLINE:
-                    rows = (
-                        session.query(Airline)
-                        .filter(Airline.is_active.is_(True))
-                        .order_by(Airline.name)
-                        .all()
-                    )
-                    seen: set = set()
-                    result: list = [(None, "Все")]
-                    for e in rows:
-                        eid = e.id
-                        if eid in seen:
-                            continue
-                        seen.add(eid)
-                        result.append((eid, e.name.strip()))
-                else:
-                    rows = (
-                        session.query(Airport)
-                        .filter(Airport.is_active.is_(True))
-                        .order_by(Airport.name)
-                        .all()
-                    )
-                    seen = set()
-                    result = [(None, "Все")]
-                    for e in rows:
-                        eid = e.id
-                        if eid in seen:
-                            continue
-                        seen.add(eid)
-                        result.append((eid, e.name.strip()))
+                model = Airline if mode == MODE_AIRLINE else Airport
+                rows = (
+                    session.query(model)
+                    .filter(model.is_active.is_(True))
+                    .order_by(model.name)
+                    .all()
+                )
+                # Ни отсева дублей по id, ни элемента «Все» здесь больше нет:
+                # id — первичный ключ и повторяться не может, а «Все» все
+                # вызывающие стороны немедленно отфильтровывали (PERF-9).
+                result = [(e.id, e.name.strip()) for e in rows]
                 self._cache.put_entities(mode, result)
                 return result
         except Exception:
             log.exception("Не удалось загрузить список предприятий")
-            return [(None, "Все")]
+            return []
 
     def load_indicators(self) -> list:
         """Загружает список показателей"""
@@ -106,30 +87,31 @@ class FilterController:
         try:
             with get_session() as session:
                 indicators = session.query(Indicator).order_by(Indicator.name).all()
-                seen = set()
-                result = [(None, "Все показатели")]
-                for i in indicators:
-                    iid = i.id
-                    if iid in seen:
-                        continue
-                    seen.add(iid)
-                    result.append((iid, i.name.strip()))
+                result = [(i.id, i.name.strip()) for i in indicators]
                 self._cache.put_indicators(result)
                 return result
         except Exception:
             log.exception("Не удалось загрузить список показателей")
-            return [(None, "Все показатели")]
+            return []
 
     def get_period_range(self) -> Tuple[int, int, int, int]:
         """Получает минимальный и максимальный год и месяц из данных"""
         try:
             with get_session() as session:
-                min_year_al = session.query(func.min(AirlineIndicators.year)).scalar()
-                max_year_al = session.query(func.max(AirlineIndicators.year)).scalar()
-                min_year_ap = session.query(func.min(AirportIndicators.year)).scalar()
-                max_year_ap = session.query(func.max(AirportIndicators.year)).scalar()
-
-                years = [y for y in (min_year_al, max_year_al, min_year_ap, max_year_ap) if y is not None]
+                # Один запрос вместо четырёх: минимум и максимум берутся одним
+                # агрегатом на таблицу, а обе таблицы соединены UNION ALL. Прежде
+                # это были четыре отдельных полных сканирования, и выполнялись
+                # они при сборке каждого виджета фильтров и при каждом сбросе
+                # (PERF-9).
+                extremes = select(
+                    func.min(AirlineIndicators.year), func.max(AirlineIndicators.year)
+                ).union_all(
+                    select(func.min(AirportIndicators.year), func.max(AirportIndicators.year))
+                )
+                years = [
+                    year for row in session.execute(extremes)
+                    for year in row if year is not None
+                ]
                 if not years:
                     return 2024, 2025, 1, 12
 

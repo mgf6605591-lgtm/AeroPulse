@@ -114,18 +114,15 @@ class FilterWidget(QGroupBox):
         self._set_default_period()
 
     def _load_entities(self, keep_selection: bool = False):
-        entities = self.filter_controller.load_entities(self.current_mode)
-        items = [(eid, label) for eid, label in entities if eid is not None]
-        # set_items сам оставляет из выбора только то, что есть в новом списке,
-        # поэтому сохранять выбор отдельно не требуется — достаточно не сбрасывать.
-        self.entity_btn.set_items(items)
+        # Отсева «Все» здесь больше нет: контроллер отдаёт только предприятия
+        # (PERF-9). set_items сам оставляет из выбора то, что есть в новом
+        # списке, поэтому сохранять выбор отдельно не требуется.
+        self.entity_btn.set_items(self.filter_controller.load_entities(self.current_mode))
         if not keep_selection:
             self.entity_btn.clear_selection()
 
     def _load_indicators(self, keep_selection: bool = False):
-        indicators = self.filter_controller.load_indicators()
-        items = [(iid, label) for iid, label in indicators if iid is not None]
-        self.indicator_btn.set_items(items)
+        self.indicator_btn.set_items(self.filter_controller.load_indicators())
         if not keep_selection:
             self.indicator_btn.clear_selection()
 
