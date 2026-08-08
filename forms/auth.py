@@ -51,6 +51,14 @@ class Auth(QMainWindow):
 
     @staticmethod
     def _resolve_auth_ui_path() -> Path:
+        """Путь к `auth.ui` — или отказ с перечнем проверенных мест (BUG-18).
+
+        Прежде возвращался первый кандидат, заведомо несуществующий, и падал уже
+        `uic.loadUi` — сообщением о том, что не удалось разобрать документ. Для
+        сборки PyInstaller это типичный сбой: разметка не попала в бандл или
+        каталог рядом с exe распакован не целиком, — и по такому сообщению
+        понять, чего именно не хватает и куда это положить, нельзя.
+        """
         candidates = [
             resource_path("forms", "UIs", "auth.ui"),
             get_app_dir() / "forms" / "UIs" / "auth.ui",
@@ -59,7 +67,11 @@ class Auth(QMainWindow):
         for path in candidates:
             if path.exists():
                 return path
-        return candidates[0]
+        checked = "\n".join(str(path) for path in candidates)
+        raise FileNotFoundError(
+            "Не найден файл разметки окна входа auth.ui.\n"
+            f"Проверены пути:\n{checked}"
+        )
 
     def login_action(self):
         username = self.login.text().strip()

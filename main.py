@@ -41,7 +41,7 @@ def main():
         init_db()
     except Exception as error:
         log.exception("Не удалось подготовить базу данных")
-        _show_startup_failure(error, written_to)
+        _show_startup_failure("Не удалось подготовить базу данных.", error, written_to)
         sys.exit(1)
 
     # Пустая база — первый запуск: администратора заводит пользователь. Учётной
@@ -51,12 +51,21 @@ def main():
         sys.exit(0)
 
     controller = AppController(app)
-    controller.start()
+    # Окно входа собирается из auth.ui, и файла может не оказаться на месте:
+    # в сборке PyInstaller разметка либо попала в бандл, либо нет. Без этой
+    # ветки такой запуск выглядел бы так же, как неудачная подготовка базы до
+    # BUG-15, — ярлык нажат, не произошло ничего (BUG-18).
+    try:
+        controller.start()
+    except Exception as error:
+        log.exception("Не удалось открыть окно входа")
+        _show_startup_failure("Не удалось открыть окно входа.", error, written_to)
+        sys.exit(1)
     sys.exit(app.exec())
 
 
-def _show_startup_failure(error: Exception, written_to) -> None:
-    """Сообщение о том, что программа не смогла подготовить базу.
+def _show_startup_failure(what: str, error: Exception, written_to) -> None:
+    """Сообщение о том, почему программа не запустилась.
 
     Текст называет причину и место журнала: без этого установка у пользователя
     выглядит как «нажал на ярлык, ничего не произошло».
@@ -65,7 +74,7 @@ def _show_startup_failure(error: Exception, written_to) -> None:
     QMessageBox.critical(
         None,
         "Не удалось запустить программу",
-        "Не удалось подготовить базу данных.\n\n"
+        f"{what}\n\n"
         f"{error}\n\n"
         f"Подробности записаны в журнал:\n{where}",
     )

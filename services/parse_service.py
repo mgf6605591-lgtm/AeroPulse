@@ -62,13 +62,17 @@ class ParseService:
                     entity_name,
                     file_path,
                 )
-            return XMLParser.parse_file(
+            # Разобранный корень передаётся дальше, а не имя файла: форма уже
+            # определена по нему, и повторный ET.parse читал бы и разбирал тот же
+            # файл второй раз — ветка 15-ГА так не делала с самого начала (BUG-17).
+            return XMLParser._parse_root(
+                root,
+                month,
+                year,
+                entity_type,
+                entity_id,
+                entity_name,
                 file_path,
-                month=month,
-                year=year,
-                entity_type=entity_type,
-                entity_id=entity_id,
-                entity_name=entity_name,
             )
         else:
             raise ValueError(f"Неподдерживаемый формат файла: {file_path}")

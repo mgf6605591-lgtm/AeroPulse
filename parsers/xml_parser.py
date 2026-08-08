@@ -43,8 +43,26 @@ class XMLParser(BaseParser):
         entity_name: Optional[str] = None,
     ) -> Dict[str, Any]:
         tree = ET.parse(file_name)
-        root = tree.getroot()
+        return cls._parse_root(
+            tree.getroot(), month, year, entity_type, entity_id, entity_name, file_name
+        )
 
+    @classmethod
+    def _parse_root(
+        cls,
+        root: ET.Element,
+        month: Optional[str],
+        year: Optional[int],
+        entity_type: Optional[str],
+        entity_id: Optional[int],
+        entity_name: Optional[str],
+        file_name: str = "",
+    ) -> Dict[str, Any]:
+        """Разбор уже прочитанного дерева.
+
+        Отдельно от `parse_file`, чтобы вызывающему, который разобрал файл ради
+        выбора формы, не пришлось читать и разбирать его второй раз (BUG-17).
+        """
         year_attr = root.get("year")
         try:
             file_year = int(year_attr) if year_attr else None

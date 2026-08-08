@@ -29,11 +29,13 @@ from controllers.report_filters import NO_FILTERS, ReportFilters, with_airline, 
 from utils.ga12_layout import ga12_total_route_types
 from utils.ga15_airport_layout import (
     GA15_METRIC_TAGS,
+    GA15_FILTERED_OUT,
     GA15_FLAT_HEADERS,
     GA15_HEADER_GROUPS,
     GA15_KEYS,
     GA15_NOT_FILLED,
     GA15_TABLE_ROWS,
+    Ga15RowSpec,
 )
 
 # Псевдонимы кода показателя → канонический код вида 15ГА-R05-ПАС_ОТП
@@ -99,6 +101,88 @@ def _ga15_metric_code_candidates(row_code: str, tag: str) -> List[str]:
         n = int(row_code[1:])
         keys.append(f"15ГА-{n:02d}-{tag}")
     return keys
+
+
+def _ga15_selected_codes(session, filters: Optional[ReportFilters]) -> Optional[Set[str]]:
+    """Коды выбранных показателей. None — отбора нет, показывать бланк целиком.
+
+    Фильтр хранит id, а бланк 15-ГА собирается по кодам, поэтому перевод нужен
+    здесь: по агрегату его не сделать — показателя, выбранного в фильтре, может
+    не оказаться ни в одной записи, и такая графа должна показывать ноль, а не
+    прочерк.
+    """
+    ids = (filters or NO_FILTERS).indicator_ids
+    if not ids:
+        return None
+    rows = session.query(Indicator.code).filter(Indicator.id.in_(ids)).all()
+    codes = {(code or "").strip() for (code,) in rows}
+    return {GA15_CODE_ALIASES.get(code, code) for code in codes if code}
+
+
+def _ga15_metric_in_filter(selected: Optional[Set[str]], row_code: str, tag: str) -> bool:
+    """Попадает ли графа строки бланка в отбор показателей.
+
+    Показатель формы 15-ГА — это не строка и не графа, а их пересечение
+    (`15ГА-R01-ПАС_ОТП`), поэтому отбор решается по ячейке.
+    """
+    if selected is None:
+        return True
+    return any(key in selected for key in _ga15_metric_code_candidates(row_code, tag))
+
+
+def _ga15_row_in_filter(spec: Ga15RowSpec, selected: Optional[Set[str]]) -> bool:
+    """Осталась ли у строки бланка хоть одна заполняемая графа в отборе.
+
+    Графы с «Х» не считаются: они не заполняются в самом бланке, и строка,
+    от которой остались только они, не показывает ничего.
+    """
+    if selected is None or not spec.row_code:
+        return True
+    return any(
+        _ga15_metric_in_filter(selected, spec.row_code, tag)
+        for tag in GA15_METRIC_TAGS
+        if tag not in spec.not_filled
+    )
+
+
+def _ga15_specs_in_filter(selected: Optional[Set[str]]) -> List[Ga15RowSpec]:
+    """Строки бланка, остающиеся на экране при заданном отборе (FUNC-7).
+
+    Заголовок раздела и «в том числе:» держатся на том, что под ними: без
+    единой оставшейся строки они превращаются в подпись к пустому месту.
+    """
+    if selected is None:
+        return list(GA15_TABLE_ROWS)
+
+    data_kinds = ("data", "subdetail")
+    keep = [
+        spec.kind not in data_kinds or _ga15_row_in_filter(spec, selected)
+        for spec in GA15_TABLE_ROWS
+    ]
+
+    for i, spec in enumerate(GA15_TABLE_ROWS):
+        if spec.kind not in ("section", "subheading"):
+            continue
+        # Раздел кончается следующим разделом и держится на любой своей строке.
+        # «В том числе:» относится только к идущей за ним детализации, поэтому
+        # его закрывает и обычная строка бланка: строка 05 стоит после «в том
+        # числе:», но раскрывает не его, а строку 03.
+        closes = (
+            ("section",) if spec.kind == "section"
+            else ("section", "subheading", "data")
+        )
+        keep[i] = False
+        for j in range(i + 1, len(GA15_TABLE_ROWS)):
+            following = GA15_TABLE_ROWS[j]
+            if following.kind in closes:
+                break
+            if following.kind in data_kinds and keep[j]:
+                keep[i] = True
+                break
+
+    return [
+        spec for spec, visible in zip(GA15_TABLE_ROWS, keep, strict=True) if visible
+    ]
 
 
 def _ga15_sum_metric(agg: Dict[str, Decimal], row_code: str, tag: str) -> tuple:
@@ -878,11 +962,13 @@ class DataController:
         with get_session() as session:
             ap = session.get(Airport, airport_id)
             airport_name = ap.name.strip() if ap else ""
+            selected = _ga15_selected_codes(session, filters)
 
         period_label = _period_label_ru(filters)
         pivot_rows: List[Dict[str, Any]] = []
+        visible = _ga15_specs_in_filter(selected)
 
-        for spec in GA15_TABLE_ROWS:
+        for spec in visible:
             row = {k: None for k in GA15_KEYS}
             if spec.kind == "title":
                 row[GA15_KEYS[0]] = spec.title.format(airport_name=airport_name)
@@ -909,13 +995,27 @@ class DataController:
                         if tag in spec.not_filled:
                             row[GA15_KEYS[ci]] = GA15_NOT_FILLED
                             continue
+                        # Графа вне отбора — не ноль: нулём отфильтрованный бланк
+                        # было бы не отличить от бланка, где данных правда нет
+                        # (FUNC-7).
+                        if not _ga15_metric_in_filter(selected, rc, tag):
+                            row[GA15_KEYS[ci]] = GA15_FILTERED_OUT
+                            continue
                         total, found = _ga15_sum_metric(agg, rc, tag)
                         row[GA15_KEYS[ci]] = _dec_to_float(total) if found else 0.0
             pivot_rows.append(row)
 
         n_data_lines = sum(
-            1 for s in GA15_TABLE_ROWS if s.kind in ("data", "subdetail") and s.row_code
+            1 for s in visible if s.kind in ("data", "subdetail") and s.row_code
         )
+
+        # Список показателей в фильтре общий на обе формы, и в нём можно выбрать
+        # одни только строки 12-ГА. Пустой бланк под заголовком выглядел бы как
+        # отчёт без данных, поэтому причина названа прямо.
+        if selected is not None and not n_data_lines:
+            note = {k: None for k in GA15_KEYS}
+            note[GA15_KEYS[0]] = "Ни один из выбранных показателей не входит в форму 15-ГА."
+            pivot_rows.append(note)
 
         return {
             "rows": pivot_rows,
