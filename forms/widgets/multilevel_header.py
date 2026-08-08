@@ -1,3 +1,4 @@
+# forms/widgets/multilevel_header.py
 from typing import List, Tuple, Optional
 from PyQt6.QtWidgets import QHeaderView
 from PyQt6.QtCore import Qt, QRect, QSize
@@ -7,26 +8,31 @@ from PyQt6.QtGui import QPainter, QPalette
 class MultiLevelHeaderView(QHeaderView):
     """
     Заголовок QTableView с двумя уровнями.
-    Полностью отключены hover-эффекты для предотвращения артефактов.
+    Секции рисуются целиком своими средствами, поэтому hover на вид не влияет.
     """
 
     def __init__(self, parent=None):
         super().__init__(Qt.Orientation.Horizontal, parent)
         self._groups: List[Tuple[int, int, str]] = []
         self._group_height = 26
-        
-        # Отключаем все интерактивные эффекты
+
+        # Секция не подсвечивается и не нажимается: `paintSection` ни разу не
+        # обращается к базовой отрисовке, состояние секции в неё не входит.
         self.setSectionsClickable(False)
         self.setHighlightSections(False)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
-        
-        # Отключаем отслеживание мыши для hover
-        self.setMouseTracking(False)
-        
+
         # Убираем фокус с заголовка
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setAttribute(Qt.WidgetAttribute.WA_Hover, False)
-        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+
+        # `WA_TransparentForMouseEvents` заводился против hover-артефактов, но
+        # отдавал мимо заголовка **все** события мыши — вместе с ними пропала и
+        # возможность тянуть границы колонок (BUG-10). Артефактам взяться неоткуда
+        # и без него: заголовок рисует себя сам и состояние секции не читает.
+        # Отслеживание мыши нужно, чтобы у границы колонки появлялся курсор
+        # изменения ширины, — иначе тянуть можно, но не догадаешься.
+        self.setMouseTracking(True)
 
     def set_groups(self, groups: List[Tuple[int, int, str]]):
         """groups = список кортежей (first_col, last_col_inclusive, label)."""
@@ -74,19 +80,35 @@ class MultiLevelHeaderView(QHeaderView):
         # Рисуем нижнюю часть
         self._paint_section_no_hover(painter, lower_rect, logicalIndex)
 
-        # Верхний заголовок группы — рисуем только для первой колонки группы
-        if logicalIndex == first:
-            # Вычисляем область группы
-            start_pos = self.sectionViewportPosition(first)
-            end_pos = self.sectionViewportPosition(last) + self.sectionSize(last)
-            group_width = end_pos - start_pos
-            
-            if group_width > 0:
-                group_rect = QRect(start_pos, rect.y(), group_width, self._group_height)
-                
-                # Проверяем видимость
-                if group_rect.right() > 0 and group_rect.left() < self.width():
-                    self._paint_group_header(painter, group_rect, label)
+        # Подпись группы рисуется при отрисовке **любой** её видимой колонки, а
+        # прямоугольник ограничивается видимой областью. Условием была первая
+        # колонка группы (`logicalIndex == first`), а Qt вызывает paintSection
+        # только для видимых секций: стоило прокрутить таблицу вправо настолько,
+        # что первая колонка группы ушла за левый край, и подпись месяца
+        # пропадала целиком — при том что колонки группы на экране (BUG-20).
+        # Случай не краевой, а обычный: свод по маршрутам строит по пять колонок
+        # на авиакомпанию в каждом месяце, и на трёх а/к за три месяца сорок пять
+        # колонок на экран не помещаются физически.
+        group_rect = self._visible_group_rect(first, last, rect.y())
+        if group_rect is not None:
+            self._paint_group_header(painter, group_rect, label)
+
+    def _visible_group_rect(self, first: int, last: int, top: int) -> Optional[QRect]:
+        """Видимая часть полосы группы, или None, если группа целиком за краем.
+
+        Подпись центрируется по видимой части, поэтому у наполовину прокрученной
+        группы она остаётся на виду, а не уезжает за край вместе с её началом.
+        """
+        start_pos = self.sectionViewportPosition(first)
+        end_pos = self.sectionViewportPosition(last) + self.sectionSize(last)
+        if end_pos <= start_pos:
+            return None
+
+        group_rect = QRect(start_pos, top, end_pos - start_pos, self._group_height)
+        visible = group_rect.intersected(
+            QRect(0, top, self.viewport().width(), self._group_height)
+        )
+        return visible if not visible.isEmpty() else None
 
     def _paint_standard_section(self, painter: QPainter, rect: QRect, logicalIndex: int):
         """Отрисовка стандартной секции без hover."""

@@ -1,7 +1,9 @@
+# forms/models/pivot_dict_model.py
 from typing import List, Dict, Any, Optional
 from PyQt6.QtCore import QAbstractTableModel, Qt, QModelIndex
 
-from db.models.roles import RAW_VALUE_ROLE
+from forms.models.formatting import format_number_ru
+from forms.models.roles import RAW_VALUE_ROLE
 from decimal import Decimal
 
 
@@ -14,7 +16,13 @@ class PivotDictModel(QAbstractTableModel):
         self._headers = headers or []
         self._keys = keys or []
 
-    def setData(self, data: List[Dict], headers: List[str], keys: List[str]):
+    def set_source_data(self, data: List[Dict], headers: List[str], keys: List[str]):
+        """Установка данных модели.
+
+        Метод назывался `setData` и перекрывал `QAbstractItemModel.setData(index,
+        value, role)` — стандартный способ Qt записать значение в ячейку. Общего
+        у них было только имя (BUG-12).
+        """
         self.beginResetModel()
         self._data = data
         self._headers = headers
@@ -27,7 +35,7 @@ class PivotDictModel(QAbstractTableModel):
     def columnCount(self, parent=QModelIndex()) -> int:
         return len(self._headers)
 
-    def data(self, index: QModelIndex, role=Qt.ItemDataRole) -> Any:
+    def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole) -> Any:
         if not index.isValid():
             return None
         r, c = index.row(), index.column()
@@ -45,15 +53,7 @@ class PivotDictModel(QAbstractTableModel):
             if val is None or val == "":
                 return ""
             if isinstance(val, (int, float, Decimal)):
-                if isinstance(val, Decimal):
-                    val = float(val)
-                # Целочисленное отображение для целых
-                if isinstance(val, float) and val == int(val):
-                    return f"{int(val):,}".replace(",", " ")
-                # Русская запись: пробел разделяет разряды, запятая — дробную часть.
-                # Разделитель разрядов заменялся и раньше, а дробный оставался
-                # точкой, из-за чего отчёт на русском показывал «1 234.57» (BUG-27).
-                return f"{val:,.2f}".replace(",", " ").replace(".", ",")
+                return format_number_ru(val)
             return str(val)
 
         elif role == Qt.ItemDataRole.TextAlignmentRole:
@@ -63,7 +63,8 @@ class PivotDictModel(QAbstractTableModel):
 
         return None
 
-    def headerData(self, section: int, orientation: Qt.Orientation, role=Qt.ItemDataRole) -> Any:
+    def headerData(self, section: int, orientation: Qt.Orientation,
+                   role: int = Qt.ItemDataRole.DisplayRole) -> Any:
         if orientation == Qt.Orientation.Horizontal and role == Qt.ItemDataRole.DisplayRole:
             if section < len(self._headers):
                 return self._headers[section]

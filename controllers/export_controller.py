@@ -8,7 +8,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font
 from openpyxl.utils import get_column_letter
 
-from db.models.roles import RAW_VALUE_ROLE
+from forms.models.roles import RAW_VALUE_ROLE
 
 
 class ExportController:

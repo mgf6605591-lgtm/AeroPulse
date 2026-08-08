@@ -2,9 +2,9 @@
 from PyQt6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QRadioButton, QPushButton, QTableView, QLabel, QAbstractItemView, QMenu
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QAction, QKeySequence, QShortcut
-from db.models.sqlalchemy_table_model import SQLAlchemyTableModel
-from db.models.pivot_dict_model import PivotDictModel
-from db.models.multilevel_header import MultiLevelHeaderView
+from forms.models.sqlalchemy_table_model import SQLAlchemyTableModel
+from forms.models.pivot_dict_model import PivotDictModel
+from forms.widgets.multilevel_header import MultiLevelHeaderView
 from controllers.data_controller import DataController
 from utils.constants import GA12_TOTAL_HEADER, ROUTE_TYPE_NAMES, VIEW_PIVOT, VIEW_DETAIL
 
@@ -222,7 +222,7 @@ class DataTableWidget(QWidget):
         
         if self.current_view == VIEW_PIVOT:
             data = self.data_controller.load_pivot_data(mode, filters, entity_id)
-            self.pivot_model.setData(data['rows'], data['headers'], data['keys'])
+            self.pivot_model.set_source_data(data['rows'], data['headers'], data['keys'])
             self.grouped_header.set_groups(data['groups'])
             
             stats = data['stats']
@@ -259,7 +259,7 @@ class DataTableWidget(QWidget):
             data = self.data_controller.load_detail_data(mode, filters)
             self.detail_model.setHeaders(data['headers'])
             self.detail_model.setColumnAttributes(data['attrs'])
-            self.detail_model.setData(data['records'])
+            self.detail_model.set_source_data(data['records'])
             self.grouped_header.set_groups([])
             self.data_count_label.setText(f"Записей: {len(data['records'])}")
             
