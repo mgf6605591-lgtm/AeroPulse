@@ -9,6 +9,8 @@
 
 import os
 import unittest
+
+from controllers.report_filters import ReportFilters
 from decimal import Decimal
 from unittest.mock import patch
 
@@ -49,7 +51,7 @@ class DetailColumnsTest(unittest.TestCase):
             else "controllers.data_controller.AirportIndicatorService.detail_rows"
         )
         with patch(service, return_value=self.rows()):
-            return self.controller.load_detail_data(mode, {"any": "filter"})
+            return self.controller.load_detail_data(mode, ReportFilters(indicator_ids=(1,)))
 
     def rows(self):
         """Снимки строк — то, что теперь отдаёт служба (BUG-14)."""
@@ -117,7 +119,7 @@ class DetailRowsAreDistinguishableTest(unittest.TestCase):
             "controllers.data_controller.AirlineIndicatorService.detail_rows",
             return_value=rows,
         ):
-            data = DataController().load_detail_data(MODE_AIRLINE, {"any": "filter"})
+            data = DataController().load_detail_data(MODE_AIRLINE, ReportFilters(indicator_ids=(1,)))
 
         self.model = SQLAlchemyTableModel()
         self.model.setHeaders(data["headers"])

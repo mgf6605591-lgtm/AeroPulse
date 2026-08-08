@@ -16,6 +16,7 @@
 import unittest
 
 from controllers.data_controller import _route_type_keys_for_total_sum
+from controllers.report_filters import ReportFilters
 from tests.support import FakeRecord, PivotCase
 
 # Строка 1 бланка: международные (гр. 4 и 5), внутренние всего (гр. 6),
@@ -151,7 +152,7 @@ class FilteredTotalsTest(PivotCase):
                        route_type="interregional"),
         ]
 
-        result = self.build_per_airline_by_routes(records, filters={"route_types": ["interregional"]})
+        result = self.build_per_airline_by_routes(records, filters=ReportFilters(route_types=("interregional",)))
 
         row = self.row_for_code(result, "965")
         self.assertEqual(BLANK_INTERREGIONAL, row["m_2025_January_total"])
@@ -165,7 +166,7 @@ class FilteredTotalsTest(PivotCase):
         ]
 
         result = self.build_per_airline_by_routes(
-            records, filters={"route_types": ["local", "interregional"]}
+            records, filters=ReportFilters(route_types=("local", "interregional"))
         )
 
         row = self.row_for_code(result, "965")

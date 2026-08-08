@@ -19,6 +19,7 @@ from db.models.entities import (
     Airline, AirlineIndicators, Indicator, Route, Shipping
 )
 from db.models.enums import Months, RouteType, ShippingRegularity
+from controllers.report_filters import ReportFilters
 from tests.support import MigratedDbCase, PivotCase, FakeRecord
 
 
@@ -53,32 +54,32 @@ class PivotDoesNotLoadFactsTest(PivotCase):
 
     def test_all_airlines(self):
         result = self.build_without_facts(
-            lambda: self.controller._load_pivot_all_airlines({"any": "filter"})
+            lambda: self.controller._load_pivot_all_airlines(ReportFilters(indicator_ids=(1,)))
         )
         self.assertEqual(100, self.row_for_code(result, "965")["m_2025_January_total"])
 
     def test_per_airline_by_routes(self):
         result = self.build_without_facts(
-            lambda: self.controller._load_pivot_per_airline({}, airline_id=1)
+            lambda: self.controller._load_pivot_per_airline(ReportFilters(), airline_id=1)
         )
         self.assertEqual(100, self.row_for_code(result, "965")["m_2025_January_rt_trunk"])
 
     def test_per_airline_summary(self):
         result = self.build_without_facts(
-            lambda: self.controller._load_pivot_per_airline_summary({}, airline_id=1)
+            lambda: self.controller._load_pivot_per_airline_summary(ReportFilters(), airline_id=1)
         )
         self.assertEqual(100, self.row_for_code(result, "965")["m_2025_January"])
 
     def test_multi_airline_by_routes(self):
         result = self.build_without_facts(
-            lambda: self.controller._load_pivot_multi_airline_by_routes({"any": "filter"})
+            lambda: self.controller._load_pivot_multi_airline_by_routes(ReportFilters(indicator_ids=(1,)))
         )
         self.assertEqual(100, self.row_for_code(result, "965")["m_2025_January_aid_1_rt_trunk"])
 
     def test_records_count_counts_facts_not_groups(self):
         """В счётчике записей — число строк отчётности, как и раньше."""
         result = self.build_without_facts(
-            lambda: self.controller._load_pivot_all_airlines({"any": "filter"})
+            lambda: self.controller._load_pivot_all_airlines(ReportFilters(indicator_ids=(1,)))
         )
         self.assertEqual(2, result["stats"]["records"])
 
@@ -107,7 +108,7 @@ class AggregateNumbersTest(MigratedDbCase):
 
     def aggregate(self, filters=None):
         with self.Session() as session:
-            return AirlineIndController.aggregate(session, filters or {})
+            return AirlineIndController.aggregate(session, filters or ReportFilters())
 
     def test_years_stay_apart(self):
         """DATA-1 на уровне запроса: год входит в группировку."""
@@ -125,7 +126,7 @@ class AggregateNumbersTest(MigratedDbCase):
         self.assertAlmostEqual(200.75, totals[2025], places=2)
 
     def test_period_filter_applies_to_the_aggregate(self):
-        rows = self.aggregate({"period_from": (2025, 1), "period_to": (2025, 12)})
+        rows = self.aggregate(ReportFilters(period_from=(2025, 1), period_to=(2025, 12)))
 
         self.assertEqual([2025], [row.year for row in rows])
 

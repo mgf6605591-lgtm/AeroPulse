@@ -23,6 +23,7 @@ from db.models.entities import (
 )
 from db.models.enums import Months, RouteType, ShippingRegularity
 from db.models.types import MonthNumber
+from controllers.report_filters import ReportFilters
 from tests.support import MigratedDbCase, scalar
 
 # Отчётность за три месяца подряд, переходящая через год: именно здесь прежний
@@ -60,12 +61,12 @@ class PeriodBoundsTest(unittest.TestCase):
     """Границы периода — одно число ГГГГММ."""
 
     def test_bounds_are_packed(self):
-        filters = {"period_from": (2024, 11), "period_to": (2025, 2)}
+        filters = ReportFilters(period_from=(2024, 11), period_to=(2025, 2))
         self.assertEqual((202411, 202502), period_bounds(filters))
 
     def test_no_period_means_no_bounds(self):
-        self.assertIsNone(period_bounds({}))
-        self.assertIsNone(period_bounds({"period_from": (2024, 11)}))
+        self.assertIsNone(period_bounds(ReportFilters()))
+        self.assertIsNone(period_bounds(ReportFilters(period_from=(2024, 11))))
 
 
 class PeriodInSqlTest(unittest.TestCase):
@@ -74,7 +75,7 @@ class PeriodInSqlTest(unittest.TestCase):
     def test_query_mentions_the_month(self):
         query = apply_period_filter(
             select(AirlineIndicators), AirlineIndicators,
-            {"period_from": (2024, 11), "period_to": (2025, 2)},
+            ReportFilters(period_from=(2024, 11), period_to=(2025, 2)),
         )
 
         sql = str(query.compile(compile_kwargs={"literal_binds": True}))
@@ -85,7 +86,7 @@ class PeriodInSqlTest(unittest.TestCase):
     def test_query_without_period_is_untouched(self):
         base = select(AirlineIndicators)
 
-        self.assertIs(base, apply_period_filter(base, AirlineIndicators, {}))
+        self.assertIs(base, apply_period_filter(base, AirlineIndicators, ReportFilters()))
 
 
 class PeriodSelectionCase(MigratedDbCase):
@@ -131,31 +132,31 @@ class PeriodSelectionTest(PeriodSelectionCase):
 
     def test_range_crossing_the_year_boundary(self):
         """Декабрь 2024 — январь 2025: две записи из четырёх."""
-        filters = {"period_from": (2024, 12), "period_to": (2025, 1)}
+        filters = ReportFilters(period_from=(2024, 12), period_to=(2025, 1))
 
         self.assertEqual([(2024, "December"), (2025, "January")], self.airline_periods(filters))
 
     def test_bounds_are_inclusive(self):
-        filters = {"period_from": (2024, 11), "period_to": (2025, 2)}
+        filters = ReportFilters(period_from=(2024, 11), period_to=(2025, 2))
 
         self.assertEqual(4, len(self.airline_periods(filters)))
 
     def test_month_outside_the_range_is_dropped_within_the_same_year(self):
         """Ноябрь 2024 не входит в период с декабря 2024 — прежде это решалось в Python."""
-        filters = {"period_from": (2024, 12), "period_to": (2024, 12)}
+        filters = ReportFilters(period_from=(2024, 12), period_to=(2024, 12))
 
         self.assertEqual([(2024, "December")], self.airline_periods(filters))
 
     def test_empty_range_returns_nothing(self):
-        filters = {"period_from": (2023, 1), "period_to": (2023, 12)}
+        filters = ReportFilters(period_from=(2023, 1), period_to=(2023, 12))
 
         self.assertEqual([], self.airline_periods(filters))
 
     def test_without_period_everything_is_returned(self):
-        self.assertEqual(4, len(self.airline_periods({})))
+        self.assertEqual(4, len(self.airline_periods(ReportFilters())))
 
     def test_airport_branch_filters_the_same_way(self):
-        filters = {"period_from": (2024, 12), "period_to": (2025, 1)}
+        filters = ReportFilters(period_from=(2024, 12), period_to=(2025, 1))
 
         self.assertEqual([(2024, "December"), (2025, "January")], self.airport_periods(filters))
 

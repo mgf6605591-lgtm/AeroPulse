@@ -17,6 +17,7 @@ from openpyxl import Workbook
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.orm import sessionmaker
 
+from controllers.report_filters import ReportFilters
 from controllers.data_controller import DataController
 from controllers.reference_cache import reference_cache
 from db.database import _sqlite_pragmas
@@ -341,22 +342,22 @@ class PivotCase(MigratedDbCase):
     def build_all_airlines(self, records):
         (agg,) = self.with_records(records)
         with agg:
-            return self.controller._load_pivot_all_airlines({"any": "filter"})
+            return self.controller._load_pivot_all_airlines(ReportFilters(indicator_ids=(1,)))
 
     def build_per_airline_summary(self, records):
         (agg,) = self.with_records(records)
         with agg:
-            return self.controller._load_pivot_per_airline_summary({}, airline_id=1)
+            return self.controller._load_pivot_per_airline_summary(ReportFilters(), airline_id=1)
 
     def build_per_airline_by_routes(self, records, filters=None):
         (agg,) = self.with_records(records)
         with agg:
-            return self.controller._load_pivot_per_airline(filters or {}, airline_id=1)
+            return self.controller._load_pivot_per_airline(filters or ReportFilters(), airline_id=1)
 
     def build_multi_airline_by_routes(self, records, filters=None):
         (agg,) = self.with_records(records)
         with agg:
-            return self.controller._load_pivot_multi_airline_by_routes(filters or {"any": "filter"})
+            return self.controller._load_pivot_multi_airline_by_routes(filters or ReportFilters(indicator_ids=(1,)))
 
     @staticmethod
     def row_for_code(result, code):

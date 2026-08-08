@@ -16,6 +16,8 @@
 
 import os
 import unittest
+
+from controllers.report_filters import ReportFilters
 from decimal import Decimal
 from pathlib import Path
 from unittest.mock import patch
@@ -150,7 +152,7 @@ class Ga15PivotUsesTheLayoutTest(MigratedDbCase):
 
         with patch("controllers.data_controller.AirportIndicatorService.aggregate",
                    return_value=aggregate_rows):
-            return DataController()._load_pivot_ga15_airport({}, airport_id=1)
+            return DataController()._load_pivot_ga15_airport(ReportFilters(), airport_id=1)
 
     def row09(self, result):
         for row in result["rows"]:

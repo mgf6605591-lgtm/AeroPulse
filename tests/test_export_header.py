@@ -20,6 +20,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from openpyxl import load_workbook
 
+from controllers.report_filters import ReportFilters
 from controllers.export_controller import ExportController
 from controllers.export_header import build_export_header, period_label
 from utils.constants import MODE_AIRLINE, MODE_AIRPORT, VIEW_DETAIL, VIEW_PIVOT
@@ -107,26 +108,26 @@ class PeriodLabelTest(unittest.TestCase):
     месяцем без года (DATA-1), и вне контекста отчёт не читался."""
 
     def test_single_month_is_not_repeated_twice(self):
-        label = period_label({"period_from": (2025, 1), "period_to": (2025, 1)})
+        label = period_label(ReportFilters(period_from=(2025, 1), period_to=(2025, 1)))
 
         self.assertEqual("Январь 2025", label)
 
     def test_range_shows_both_ends(self):
-        label = period_label({"period_from": (2025, 1), "period_to": (2025, 3)})
+        label = period_label(ReportFilters(period_from=(2025, 1), period_to=(2025, 3)))
 
         self.assertEqual("Январь 2025 — Март 2025", label)
 
     def test_range_across_years(self):
-        label = period_label({"period_from": (2024, 12), "period_to": (2025, 2)})
+        label = period_label(ReportFilters(period_from=(2024, 12), period_to=(2025, 2)))
 
         self.assertEqual("Декабрь 2024 — Февраль 2025", label)
 
     def test_missing_period_gives_no_line(self):
-        self.assertEqual("", period_label({}))
-        self.assertIsNone(value_of(header_for(filters={}), "Период"))
+        self.assertEqual("", period_label(ReportFilters()))
+        self.assertIsNone(value_of(header_for(filters=ReportFilters()), "Период"))
 
     def test_period_reaches_the_header(self):
-        header = header_for(filters={"period_from": (2025, 1), "period_to": (2025, 3)})
+        header = header_for(filters=ReportFilters(period_from=(2025, 1), period_to=(2025, 3)))
 
         self.assertEqual("Январь 2025 — Март 2025", value_of(header, "Период"))
 
@@ -191,7 +192,7 @@ class HeaderReachesTheFileTest(WorkbookCase):
         super().setUp()
         self.header = header_for(
             stats={"airline_name": "Тестовая АК", "indicators": 31},
-            filters={"period_from": (2025, 1), "period_to": (2025, 3)},
+            filters=ReportFilters(period_from=(2025, 1), period_to=(2025, 3)),
             user="ваня",
         )
 
@@ -313,7 +314,7 @@ class WidgetRemembersWhatItShowsTest(unittest.TestCase):
             # таблицей читает и месяцы тоже.
             "stats": {"airline_name": "Тестовая АК", "indicators": 31, "months": 3},
         }
-        filters = {"period_from": (2025, 1), "period_to": (2025, 3)}
+        filters = ReportFilters(period_from=(2025, 1), period_to=(2025, 3))
 
         with patch.object(widget.data_controller, "load_pivot_data", return_value=loaded):
             widget.load_data(MODE_AIRLINE, filters)

@@ -23,6 +23,7 @@ from db.models.enums import Months, RouteType, ShippingRegularity
 from services.airline_ind_service import AirlineIndicatorService
 from services.airport_ind_service import AirportIndicatorService
 from services.detail_rows import DetailRow
+from controllers.report_filters import ReportFilters
 from tests.support import MigratedDbCase
 
 
@@ -61,7 +62,7 @@ class DetailRowsCase(MigratedDbCase):
 class AirlineDetailRowsTest(DetailRowsCase):
 
     def rows(self):
-        return AirlineIndicatorService.detail_rows({"airline_id": 1})
+        return AirlineIndicatorService.detail_rows(ReportFilters(airline_ids=(1,)))
 
     def test_service_returns_snapshots_not_orm(self):
         row = self.rows()[0]
@@ -102,13 +103,13 @@ class AirlineDetailRowsTest(DetailRowsCase):
         self.assertEqual(Decimal("142.5"), row.value)
 
     def test_empty_filters_return_everything(self):
-        self.assertEqual(1, len(AirlineIndicatorService.detail_rows({})))
+        self.assertEqual(1, len(AirlineIndicatorService.detail_rows(ReportFilters())))
 
 
 class AirportDetailRowsTest(DetailRowsCase):
 
     def rows(self):
-        return AirportIndicatorService.detail_rows({"airport_id": 1})
+        return AirportIndicatorService.detail_rows(ReportFilters(airport_ids=(1,)))
 
     def test_locality_is_carried(self):
         row = self.rows()[0]
