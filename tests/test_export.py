@@ -20,7 +20,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from openpyxl import load_workbook
 
-from controllers.export_controller import ExportController
+from forms.table_export import export_table_to_excel
 
 try:
     from PyQt6.QtWidgets import QApplication, QTableView
@@ -66,7 +66,7 @@ class ExportCase(unittest.TestCase):
 
     def export(self, header_groups=None):
         self.assertTrue(
-            ExportController.export_to_excel(self.view, self.path, header_groups=header_groups)
+            export_table_to_excel(self.view, self.path, header_groups=header_groups)
         )
         return load_workbook(self.path).active
 

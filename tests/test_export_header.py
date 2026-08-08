@@ -21,7 +21,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from openpyxl import load_workbook
 
 from controllers.report_filters import ReportFilters
-from controllers.export_controller import ExportController
+from forms.table_export import export_table_to_excel
 from controllers.export_header import build_export_header, period_label
 from utils.constants import MODE_AIRLINE, MODE_AIRPORT, VIEW_DETAIL, VIEW_PIVOT
 
@@ -178,7 +178,7 @@ class WorkbookCase(unittest.TestCase):
         self.view.setModel(self.model)
 
     def export(self, header=None, header_groups=None):
-        self.assertTrue(ExportController.export_to_excel(
+        self.assertTrue(export_table_to_excel(
             self.view, self.path, header_groups=header_groups, header=header
         ))
         return load_workbook(self.path).active
