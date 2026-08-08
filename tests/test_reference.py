@@ -135,19 +135,19 @@ class ActiveFlagTest(ReferenceCase):
 
     def test_inactive_airport_disappears_from_filters(self):
         controller = FilterController(ReferenceDataCache())
-        self.assertEqual(2, len(controller.load_entities(MODE_AIRPORT)))  # «Все» + аэропорт
+        self.assertEqual(1, len(controller.load_entities(MODE_AIRPORT)))
 
         ReferenceService.set_active("airport", 1, False)
         # Кеш общий на приложение, и новый экземпляр контроллера его не сбрасывает:
         # справочник перечитывается по явной инвалидации, как это делает окно (BUG-7).
         controller.clear_cache()
 
-        self.assertEqual([(None, "Все")], controller.load_entities(MODE_AIRPORT))
+        self.assertEqual([], controller.load_entities(MODE_AIRPORT))
 
     def test_inactive_airline_disappears_from_filters(self):
         ReferenceService.set_active("airline", 1, False)
         controller = FilterController(ReferenceDataCache())
-        self.assertEqual([(None, "Все")], controller.load_entities(MODE_AIRLINE))
+        self.assertEqual([], controller.load_entities(MODE_AIRLINE))
 
     def test_reports_are_kept_when_deactivated(self):
         ReferenceService.set_active("airport", 1, False)
@@ -159,7 +159,7 @@ class ActiveFlagTest(ReferenceCase):
         ReferenceService.set_active("airport", 1, False)
         ReferenceService.set_active("airport", 1, True)
         controller = FilterController(ReferenceDataCache())
-        self.assertEqual(2, len(controller.load_entities(MODE_AIRPORT)))
+        self.assertEqual(1, len(controller.load_entities(MODE_AIRPORT)))
 
 
 class CrudTest(ReferenceCase):

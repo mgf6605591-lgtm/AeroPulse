@@ -37,12 +37,13 @@ def setUpModule():
         _app = QApplication.instance() or QApplication([])
 
 
-AIRLINES_BEFORE = [(None, "Все"), (1, "Первая АК")]
-AIRLINES_AFTER = [(None, "Все"), (1, "Первая АК"), (2, "Вторая АК")]
-AIRPORTS_BEFORE = [(None, "Все"), (10, "Первый аэропорт")]
-AIRPORTS_AFTER = [(None, "Все"), (10, "Первый аэропорт"), (20, "Второй аэропорт")]
-INDICATORS_BEFORE = [(None, "Все показатели"), (100, "Налет часов")]
-INDICATORS_AFTER = [(None, "Все показатели"), (100, "Налет часов"), (200, "Самолето-километры")]
+# Без пункта «Все»: контроллер отдаёт только сами записи справочника (PERF-9).
+AIRLINES_BEFORE = [(1, "Первая АК")]
+AIRLINES_AFTER = [(1, "Первая АК"), (2, "Вторая АК")]
+AIRPORTS_BEFORE = [(10, "Первый аэропорт")]
+AIRPORTS_AFTER = [(10, "Первый аэропорт"), (20, "Второй аэропорт")]
+INDICATORS_BEFORE = [(100, "Налет часов")]
+INDICATORS_AFTER = [(100, "Налет часов"), (200, "Самолето-километры")]
 
 
 class FakeReference:
@@ -236,7 +237,7 @@ class SharedCacheTest(unittest.TestCase):
         # Подмена get_session обрывает обращение, и виден резервный ответ — он и
         # доказывает, что попытка чтения была.
         with patch("controllers.filter_controller.get_session", side_effect=RuntimeError("нет базы")):
-            self.assertEqual([(None, "Все показатели")], second.load_indicators())
+            self.assertEqual([], second.load_indicators())
 
     def test_default_cache_is_the_application_wide_one(self):
         from controllers.reference_cache import reference_cache
