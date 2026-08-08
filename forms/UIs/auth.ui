@@ -91,19 +91,10 @@
      <string>Пароль:</string>
     </property>
    </widget>
-   <widget class="QPushButton" name="pushButton">
-    <property name="geometry">
-     <rect>
-      <x>140</x>
-      <y>200</y>
-      <width>121</width>
-      <height>24</height>
-     </rect>
-    </property>
-    <property name="text">
-     <string>Зарегистрироваться</string>
-    </property>
-   </widget>
+   <!-- Кнопки «Зарегистрироваться» здесь больше нет (FUNC-3). Она была видима,
+        ни к чему не подключена и ничего не делала по нажатию. Самостоятельная
+        регистрация приложению не нужна вовсе: пользователь один, а первую
+        учётную запись заводит окно первичной настройки (SEC-2). -->
   </widget>
   <widget class="QMenuBar" name="menubar">
    <property name="geometry">
