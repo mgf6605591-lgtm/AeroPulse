@@ -23,13 +23,13 @@ from db.models.entities import AirlineIndicators, AirportIndicators
 from services import journal_service as journal
 from services.import_service import ImportService
 from controllers.filter_controller import FilterController
-from controllers.export_controller import ExportController
 from forms.widgets.filter_widget import FilterWidget
 from forms.widgets.airport_filter_widget import AirportFilterWidget
 from forms.widgets.data_table_widget import DataTableWidget
 from forms.widgets.import_dialog import ImportDialog
 from forms.widgets.reference_dialog import ReferenceDialog
 from forms.import_runner import ImportRunner
+from forms.table_export import export_table_to_excel
 from utils.constants import MONTHS_RU, MODE_AIRLINE, MODE_AIRPORT
 
 log = logging.getLogger(__name__)
@@ -52,7 +52,6 @@ class MainWindow(QMainWindow):
         self.current_user = current_user
         self.current_mode = MODE_AIRLINE
         self.filter_controller = FilterController()
-        self.export_controller = ExportController()
         self._import_runner = None
 
         self.setWindowTitle(f"Система учета статистических данных — {current_user.username}")
@@ -293,7 +292,7 @@ class MainWindow(QMainWindow):
             return
         tw = self.table_widget_airline if self.tabs.currentIndex() == 0 else self.table_widget_airport
         groups = tw.get_header_groups_for_export()
-        self.export_controller.export_to_excel(
+        export_table_to_excel(
             tw.get_table_view(),
             file_path,
             self,
