@@ -176,10 +176,15 @@ class MainWindow(QMainWindow):
         if not paths:
             return
 
+        # Тип предприятия — по вкладке, с которой позвали импорт. Диалог всегда
+        # открывался на «Авиакомпании», и с вкладки аэропортов пользователь
+        # получал не тот список (FUNC-12).
+        opened_for = 'airline' if self.current_mode == MODE_AIRLINE else 'airport'
         dialog = ImportDialog(self)
-
-        airlines = ImportService.get_airlines()
-        dialog.set_entities(airlines, 'airline')
+        dialog.select_type(opened_for)
+        # Список заполняется здесь, а не обработчиком смены типа: если нужный тип
+        # уже стоит первым, Qt сигнала о смене не шлёт и список остался бы пустым.
+        self.refresh_entities(opened_for, dialog.entity_combo)
 
         if dialog.exec() != ImportDialog.DialogCode.Accepted:
             return

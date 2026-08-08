@@ -53,12 +53,26 @@ class ImportDialog(QDialog):
         if hasattr(self, 'parent') and hasattr(self.parent(), 'refresh_entities'):
             self.parent().refresh_entities(self.get_type(), self.entity_combo)
     
-    def set_entities(self, entities: list, entity_type: str):
-        """Устанавливает список предприятий с ID"""
-        self.entity_combo.clear()
-        self.entity_combo.setEnabled(True)
-        for entity_id, entity_name in entities:
-            self.entity_combo.addItem(entity_name, entity_id)
+    def select_type(self, entity_type: str) -> None:
+        """Ставит тип предприятия — по вкладке, с которой позвали импорт (FUNC-12).
+
+        Диалог всегда открывался на «Авиакомпании» независимо от вкладки: с
+        вкладки аэропортов пользователь получал список авиакомпаний, и, не
+        заметив этого, упирался в отказ по несовпадению формы (DATA-6).
+
+        Сигнал смены типа на время выбора глушится, а список предприятий
+        заполняет вызывающий. Иначе выходило несимметрично: при выборе
+        «Аэропорта» срабатывал `_on_type_changed` и список читался дважды, а при
+        «Авиакомпании» Qt сигнала не слал вовсе — тип и так стоял первым.
+        """
+        index = self.type_combo.findData(entity_type)
+        if index < 0:
+            return
+        self.type_combo.blockSignals(True)
+        try:
+            self.type_combo.setCurrentIndex(index)
+        finally:
+            self.type_combo.blockSignals(False)
     
     def accept(self):
         """Пропускает дальше только предприятие, действительно выбранное из списка.

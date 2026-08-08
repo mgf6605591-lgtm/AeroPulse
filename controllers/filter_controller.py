@@ -10,6 +10,38 @@ from utils.constants import MONTHS_LIST, MODE_AIRLINE
 log = logging.getLogger(__name__)
 
 
+
+def period_from_widget(widget):
+    """Границы периода из комбобоксов виджета: ((год, месяц), (год, месяц)) или None.
+
+    Одно чтение на оба места, где период собирался: код был дословно повторён во
+    вкладке авиакомпаний и во вкладке аэропортов, и правило порядка границ
+    (BUG-16) пришлось бы вводить дважды.
+    """
+    from_month_key = widget.get_from_month()
+    from_year = widget.get_from_year()
+    to_month_key = widget.get_to_month()
+    to_year = widget.get_to_year()
+
+    if not (from_month_key and from_year and to_month_key and to_year):
+        return None
+
+    return (
+        (from_year, MONTHS_LIST.index(from_month_key) + 1),
+        (to_year, MONTHS_LIST.index(to_month_key) + 1),
+    )
+
+
+def period_is_inverted(bounds) -> bool:
+    """Начало периода позже его конца.
+
+    Отбор идёт по условию «начало ≤ ключ ≤ конец», и при перевёрнутых границах
+    оно не выполняется ни для одной записи: пользователь получал пустой отчёт
+    без единого объяснения (BUG-16).
+    """
+    return bounds is not None and bounds[0] > bounds[1]
+
+
 class FilterController:
     """Контроллер для управления фильтрами"""
 
@@ -133,16 +165,9 @@ class FilterController:
             if len(ind_ids) == 1:
                 filters["indicator_id"] = int(ind_ids[0])
 
-        from_month_key = filter_widget.get_from_month()
-        from_year = filter_widget.get_from_year()
-        to_month_key = filter_widget.get_to_month()
-        to_year = filter_widget.get_to_year()
-
-        if from_month_key and from_year and to_month_key and to_year:
-            from_month_idx = MONTHS_LIST.index(from_month_key) + 1
-            to_month_idx = MONTHS_LIST.index(to_month_key) + 1
-            filters["period_from"] = (from_year, from_month_idx)
-            filters["period_to"] = (to_year, to_month_idx)
+        bounds = period_from_widget(filter_widget)
+        if bounds is not None:
+            filters["period_from"], filters["period_to"] = bounds
 
         if filter_widget.current_mode == MODE_AIRLINE:
             rts = filter_widget.get_route_filter_types()
@@ -167,16 +192,9 @@ class FilterController:
             if len(ind_ids) == 1:
                 filters["indicator_id"] = int(ind_ids[0])
 
-        from_month_key = airport_filter_widget.get_from_month()
-        from_year = airport_filter_widget.get_from_year()
-        to_month_key = airport_filter_widget.get_to_month()
-        to_year = airport_filter_widget.get_to_year()
-
-        if from_month_key and from_year and to_month_key and to_year:
-            from_month_idx = MONTHS_LIST.index(from_month_key) + 1
-            to_month_idx = MONTHS_LIST.index(to_month_key) + 1
-            filters["period_from"] = (from_year, from_month_idx)
-            filters["period_to"] = (to_year, to_month_idx)
+        bounds = period_from_widget(airport_filter_widget)
+        if bounds is not None:
+            filters["period_from"], filters["period_to"] = bounds
 
         return filters
 

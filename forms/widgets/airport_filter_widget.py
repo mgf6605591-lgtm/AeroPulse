@@ -11,6 +11,7 @@ from PyQt6.QtCore import pyqtSignal
 
 from controllers.filter_controller import FilterController
 from forms.widgets.multi_select_filter_button import MultiSelectFilterButton
+from forms.widgets.period_guard import period_is_usable
 from utils.constants import APPLY_CAPTION, APPLY_CAPTION_PENDING, MONTHS_RU, MODE_AIRPORT
 
 
@@ -147,6 +148,11 @@ class AirportFilterWidget(QGroupBox):
         self.apply_btn.setText(APPLY_CAPTION_PENDING)
 
     def _on_apply(self):
+        # Перевёрнутый период отчёт не перестраивает: пустая таблица без причины
+        # выглядит как «данных нет», а не как «границы перепутаны» (BUG-16).
+        # Отметка «не применено» при этом остаётся — отчёт и правда устарел.
+        if not period_is_usable(self, self):
+            return
         self._clear_pending()
         self.filters_changed.emit()
 
