@@ -78,8 +78,20 @@ class MonthFromXmlTest(unittest.TestCase):
         self.assertEqual("February", month_from_period("202502"))
         self.assertEqual("December", month_from_period("12"))
 
+    def test_single_digit_period_is_a_month(self):
+        """В настоящих выгрузках ведущего нуля нет: январь записан как «1».
+
+        Разбор требовал двух цифр и на месяцах с первого по девятый возвращал
+        None — период не определялся у трёх четвертей файлов годового комплекта,
+        и импорт отказывал, хотя месяц в файле проставлен.
+        """
+        for digit, month in enumerate(("January", "February", "March", "April", "May",
+                                       "June", "July", "August", "September"), start=1):
+            with self.subTest(period=digit):
+                self.assertEqual(month, month_from_period(str(digit)))
+
     def test_period_without_a_month_gives_nothing(self):
-        for value in ("", None, "abc", "2025", "202513", "202500"):
+        for value in ("", None, "abc", "0", "2025", "202513", "202500"):
             self.assertIsNone(month_from_period(value), value)
 
     def test_month_is_taken_from_the_file_name_as_a_fallback(self):

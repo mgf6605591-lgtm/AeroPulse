@@ -12,7 +12,9 @@
 import os
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 from decimal import Decimal
+from pathlib import Path
 from unittest.mock import patch
 
 from openpyxl import Workbook
@@ -22,9 +24,11 @@ from db.models.entities import Airline, Airport, Locality
 from importers.data_importer import DataImporter
 from parsers.f15_xlsx_parser import F15XLSXParser
 from parsers.xlsx_parser import XLSXParser
+from parsers.xml_parser import XMLParser
 from services.import_service import ImportService
 from services.parse_service import ParseService
 from tests.support import MigratedDbCase, make_ga12_workbook
+from utils.ga12_layout import GA12_ROW_BY_XML_ROW
 
 F15_ROWS = (
     (1, "Международные регулярные"),
@@ -299,6 +303,12 @@ class ImportServiceGateTest(MigratedDbCase, WorkbookCase):
 REAL_GA12 = "12-га январь.xlsx"
 REAL_F15 = "ФКП АС 15-ГА Февраль 2026 год(1).xlsx"
 
+# XML-выгрузки 12-ГА: три авиакомпании по двенадцать месяцев 2025 года.
+REAL_GA12_XML_DIR = "12-ГА 3 авиакомпании"
+# Тот же отчёт, что и REAL_GA12: АО «Авиакомпания "АЛРОСА"», январь 2025 года.
+# Именно эта пара закрывает сравнение форматов на настоящих файлах (INFRA-1).
+REAL_GA12_XML = os.path.join(REAL_GA12_XML_DIR, "0615106_12_12_2269_2025_1.xml")
+
 
 @unittest.skipUnless(os.path.exists(REAL_GA12), f"нет файла {REAL_GA12}")
 class RealGa12FileTest(unittest.TestCase):
@@ -397,6 +407,165 @@ class RealF15FileTest(unittest.TestCase):
             for i in F15XLSXParser.parse_file(REAL_F15)["indicators"]
         }
         self.assertEqual({0.0}, {v for k, v in values.items() if "-R02-" in k})
+
+
+@unittest.skipUnless(
+    os.path.exists(REAL_GA12) and os.path.exists(REAL_GA12_XML),
+    "нет пары «XLSX + XML» одного отчёта 12-ГА",
+)
+class RealGa12FormatParityTest(unittest.TestCase):
+    """Один отчёт в двух форматах — на настоящих файлах, а не на собранных в тесте.
+
+    `FormatParityTest` в `test_ga12_layout.py` сравнивает форматы на книге и XML,
+    собранных тут же, и потому проверяет только раскладку: в синтетическом отчёте
+    заполнено всё. Настоящая пара добавляет то, чего в ней не воспроизвести, —
+    как выгрузка обходится с незаполненным.
+    """
+
+    def setUp(self):
+        self.from_xlsx = XLSXParser.parse_file(REAL_GA12)
+        self.from_xml = XMLParser.parse_file(REAL_GA12_XML)
+
+    @staticmethod
+    def by_code(result: dict) -> dict:
+        return {(i["indicator_code"], i["route_type"]): i["value"] for i in result["indicators"]}
+
+    def test_both_files_are_the_same_report(self):
+        """Сравнивать есть смысл только один отчёт за один период.
+
+        Заодно единственная проверка периода XML на настоящем файле: в выгрузках
+        январь записан как `period="1"`, без ведущего нуля.
+        """
+        self.assertEqual(("January", 2025), (self.from_xlsx["month"], self.from_xlsx["year"]))
+        self.assertEqual(("January", 2025), (self.from_xml["month"], self.from_xml["year"]))
+        self.assertEqual("airline", self.from_xlsx["data_type"])
+        self.assertEqual("airline", self.from_xml["data_type"])
+
+    def test_shared_rows_have_the_same_values(self):
+        """Совпадение точное: значения — `Decimal`, и сравниваются как есть."""
+        xlsx, xml = self.by_code(self.from_xlsx), self.by_code(self.from_xml)
+        shared = set(xlsx) & set(xml)
+        self.assertTrue(shared)
+        self.assertEqual({key: xlsx[key] for key in shared}, {key: xml[key] for key in shared})
+
+    def test_the_workbook_has_every_row_of_the_xml(self):
+        """Строка, которую выгрузка написала, обязана найтись и в книге."""
+        self.assertEqual(set(), set(self.by_code(self.from_xml)) - set(self.by_code(self.from_xlsx)))
+
+    def test_rows_only_in_the_workbook_are_zeros(self):
+        """Расхождение наборов — целиком нули, и это свойство выгрузки, а не разбора.
+
+        Бланк печатает 0 в международных графах и в строке некоммерческих полётов;
+        XML пустую графу и пустую строку просто не пишет. Свести наборы нечем:
+        дописать нули в XML значило бы придумать значения, которых в файле нет,
+        а пропустить их в XLSX — потерять заявленное организацией «перевозок не
+        было». Поэтому проверяется не равенство наборов, а состав разницы.
+        """
+        xlsx, xml = self.by_code(self.from_xlsx), self.by_code(self.from_xml)
+        surplus = {key: value for key, value in xlsx.items() if key not in xml}
+        self.assertTrue(surplus, "нулевых граф в книге не нашлось — сравнивать нечего")
+        self.assertEqual([], [(key, value) for key, value in surplus.items() if value != 0])
+
+    def test_names_measures_and_sections_agree(self):
+        """Один код показателя не должен означать в двух форматах разное."""
+
+        def described(result: dict) -> dict:
+            return {
+                i["indicator_code"]: (i["indicator_name"], i["measure"], i["regularity"])
+                for i in result["indicators"]
+            }
+
+        xlsx, xml = described(self.from_xlsx), described(self.from_xml)
+        self.assertEqual(
+            {code: xlsx[code] for code in xml},
+            xml,
+        )
+
+
+@unittest.skipUnless(os.path.isdir(REAL_GA12_XML_DIR), f"нет каталога {REAL_GA12_XML_DIR}")
+class RealGa12RoundingTest(unittest.TestCase):
+    """Округление: сумма разобранных значений сходится с бланком до последнего знака.
+
+    Графа 9 «ИТОГО гр.4+гр.5+гр.6» в базу не идёт — она производная. Здесь она
+    берётся из файла как эталон: сложить то, что разобрал парсер, и получить ровно
+    её. Равенство держится на `Decimal`; на `float` оно рвётся в младшем разряде
+    (BUG-4), и проверяется весь годовой комплект, а не одна пара файлов.
+    """
+
+    @staticmethod
+    def files() -> list:
+        return sorted(Path(REAL_GA12_XML_DIR).glob("*.xml"))
+
+    @staticmethod
+    def control_totals(path: Path) -> dict:
+        """Графа 9 по каждой строке — прямо из файла, минуя парсер."""
+        root = ET.parse(str(path)).getroot()
+        totals = {}
+        for row in root.findall(".//sections/section/row"):
+            for col in row.findall("col"):
+                if col.get("code") == "9" and col.text:
+                    totals[int(row.get("code"))] = Decimal(col.text.strip())
+        return totals
+
+    @staticmethod
+    def by_code(path: Path) -> dict:
+        parsed = XMLParser.parse_file(str(path))
+        return {(i["indicator_code"], i["route_type"]): i["value"] for i in parsed["indicators"]}
+
+    def test_route_types_add_up_to_the_control_column(self):
+        """Международные плюс внутренние — это и есть графа 9.
+
+        Графы 7 и 8 подписаны «из них» и входят в графу 6, поэтому в сумму не
+        берутся: сложить все четыре вида сообщения значило бы посчитать внутренние
+        дважды.
+        """
+        for path in self.files():
+            values = self.by_code(path)
+            for xml_row, total in self.control_totals(path).items():
+                row = GA12_ROW_BY_XML_ROW.get(xml_row)
+                if row is None:
+                    continue
+                # Слагаемые складываются с нуля-целого: если значения однажды
+                # снова станут float, расхождение будет видно числом, а не
+                # ошибкой сложения разных типов.
+                parts = sum(values.get((row.code, route), 0) for route in ("trunk", "local"))
+                with self.subTest(file=path.name, row=row.code):
+                    self.assertEqual(total, parts)
+
+    def test_ton_detail_adds_up_to_its_parent(self):
+        """а) пассажирский + б) грузовой + в) почтовый = «Выполненный тоннокилометраж».
+
+        Равенство есть в самом бланке, поэтому расхождение означало бы либо
+        потерянную точность, либо строку, опознанную не под своим кодом.
+        """
+        detail = ("450пас", "450гр", "450пч")
+        for path in self.files():
+            values = self.by_code(path)
+            for route in ("trunk", "local", "interregional", "subsidir"):
+                if ("450", route) not in values:
+                    continue
+                parts = sum(values.get((code, route), 0) for code in detail)
+                with self.subTest(file=path.name, route_type=route):
+                    self.assertEqual(values[("450", route)], parts)
+
+    def test_the_files_still_hold_sums_that_float_cannot_take(self):
+        """Проверки выше имеют смысл, пока такие суммы в комплекте есть.
+
+        Если однажды не останется ни одной, равенство станет выполняться и на
+        `float` — обе проверки перестанут ловить BUG-4, ничем этого не показав.
+        """
+        broken = 0
+        for path in self.files():
+            root = ET.parse(str(path)).getroot()
+            for row in root.findall(".//sections/section/row"):
+                cols = {c.get("code"): c.text.strip() for c in row.findall("col") if c.text}
+                if "9" not in cols:
+                    continue
+                parts = [cols[code] for code in ("4", "5", "6") if code in cols]
+                exact = sum((Decimal(part) for part in parts), Decimal(0)) == Decimal(cols["9"])
+                if exact and sum(float(part) for part in parts) != float(cols["9"]):
+                    broken += 1
+        self.assertGreater(broken, 0)
 
 
 if __name__ == "__main__":

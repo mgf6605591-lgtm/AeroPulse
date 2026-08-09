@@ -29,12 +29,16 @@ def month_name(number: int) -> Optional[str]:
 
 
 def month_from_period(period: str) -> Optional[str]:
-    """Месяц из атрибута `period` в корне XML: последние две цифры — номер 01…12."""
+    """Месяц из атрибута `period` в корне XML: последние две цифры — номер 1…12.
+
+    Ведущий ноль в выгрузках не пишется: январь — это `period="1"`, а не «01».
+    Прежнее требование двух цифр отбрасывало месяцы с первого по девятый, то есть
+    три четверти любого годового комплекта: файл доходил до ворот импорта без
+    периода и получал отказ, хотя месяц в нём проставлен.
+    """
     if not period or not str(period).strip().isdigit():
         return None
     digits = str(period).strip()
-    if len(digits) < 2:
-        return None
     return month_name(int(digits[-2:]))
 
 
