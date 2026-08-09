@@ -203,6 +203,104 @@ def make_ga12_workbook(path, *, titul_period="за январь 2025 год", wi
     wb.save(path)
     return path
 
+# Строки сводного бланка 15-ГА: подпись в первой графе и номер строки типового
+# бланка, которому она отвечает. «ВСЕГО» отвечает сразу двум: международных
+# перевозок в этом бланке нет, поэтому «Внутренние — всего» равны «Коммерческим
+# перевозкам — всего».
+GA15_ENTERPRISE_ROWS = (
+    ("1. Внутренние регулярные-всего", ("R05",)),
+    ("2. Внутренние нерегулярные - всего", ("R06",)),
+)
+
+# Графы бланка: номер графы → метка метрики в кодах показателей. Взяты из шапки
+# самого бланка, а не из таблицы парсера: фикстура, собранная по его коду,
+# подтверждала бы только саму себя. Между графами пассажиров стоят «в т.ч. РБ»
+# (4, 6, 8, 10) — в форму 15-ГА они не идут.
+GA15_ENTERPRISE_GRAPHS = {
+    2: "ВС",
+    3: "ПАС_ОТП",
+    5: "ПАС_ПРИН",
+    7: "ПАС_ВСЕГО",
+    9: "ПАС_ТРАНЗ",
+    11: "ГР_ОТГР",
+    12: "ГР_РАЗГ",
+    13: "ГР_ВСЕГО",
+    14: "ПЧ_ОТГР",
+    15: "ПЧ_РАЗГ",
+    16: "ПЧ_ВСЕГО",
+}
+
+GA15_ENTERPRISE_NAME = 'ФКП "Аэропорты Севера"'
+
+
+def ga15_enterprise_cell(block: int, line: int, graph: int) -> int:
+    """Своё число в каждой ячейке: перепутанные графы и блоки видно сразу."""
+    return block * 1000 + line * 100 + graph
+
+
+def make_ga15_enterprise_workbook(path, *, airports=("Алдан", "Батагай"),
+                                  period="за __январь_2025__г.",
+                                  enterprise=GA15_ENTERPRISE_NAME):
+    """Книга сводного бланка 15-ГА: блок предприятия и блок на каждый аэропорт.
+
+    Разметка повторяет присланный бланк ФКП «Аэропорты Севера»: у предприятия
+    название дописано в ячейку подписи через подчёркивания, у аэропорта стоит в
+    ячейке правее. Значение блока предприятия — сумма его аэропортов, как и в
+    настоящем файле.
+    """
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "(месяц)Х2 ДВТ "
+    # A1 задаёт начало используемого диапазона: без неё pandas начал бы читать с
+    # первой заполненной строки и все индексы разъехались бы.
+    ws.cell(row=1, column=1, value="СВЕДЕНИЯ ОБ ОБЪЕМЕ ПЕРЕВОЗОК ЧЕРЕЗ АЭРОПОРТЫ")
+    ws.cell(row=7, column=1, value=period)
+
+    def write_block(row: int, marker, values) -> int:
+        """Один блок бланка: подпись, шапка, нумерация граф, три строки."""
+        ws.cell(row=row, column=marker[0], value=marker[1])
+        ws.cell(row=row + 2, column=1, value="Виды перевозок")
+        ws.cell(row=row + 2, column=2, value="Количество отбывших-прибывших ВС - всего,ед.")
+        for graph in range(1, 17):
+            ws.cell(row=row + 5, column=graph, value=graph)
+        ws.cell(row=row + 6, column=1, value=period)
+
+        line_row = row + 7
+        for line, (label, _) in enumerate(GA15_ENTERPRISE_ROWS, start=1):
+            ws.cell(row=line_row, column=1, value=label)
+            for graph in GA15_ENTERPRISE_GRAPHS:
+                ws.cell(row=line_row, column=graph, value=values(line, graph))
+            line_row += 1
+
+        ws.cell(row=line_row + 1, column=1, value="ВСЕГО")
+        for graph in GA15_ENTERPRISE_GRAPHS:
+            total = sum(values(line, graph) for line, _ in enumerate(GA15_ENTERPRISE_ROWS, 1))
+            ws.cell(row=line_row + 1, column=graph, value=total)
+        return line_row + 4
+
+    def airport_values(block: int):
+        return lambda line, graph: ga15_enterprise_cell(block, line, graph)
+
+    def enterprise_values(line: int, graph: int) -> int:
+        return sum(
+            ga15_enterprise_cell(block, line, graph)
+            for block in range(1, len(airports) + 1)
+        )
+
+    row = 10
+    row = write_block(
+        row,
+        (1, f"   Название аэропорта ____{enterprise}______________"),
+        enterprise_values,
+    )
+    for block, name in enumerate(airports, start=1):
+        ws.cell(row=row, column=8, value=name)
+        row = write_block(row, (5, "Название аэропорта "), airport_values(block))
+
+    wb.save(path)
+    return path
+
+
 class TempDbCase(unittest.TestCase):
     """Тест с пустой временной БД (файл ещё не создан)."""
 
