@@ -10,15 +10,17 @@
 хранится в базе. Так список не может разойтись со схемой: он и есть схема.
 """
 import re
-from typing import Optional
+from typing import Optional, Tuple
 
 from db.models.enums import Months
 
 # Названия месяцев в порядке номеров 1…12 — это порядок объявления в `Months`.
 MONTH_NAMES = tuple(month.name for month in Months)
 
-# Номер месяца в имени файла метаданных: «..._2025_02_...».
-_FILENAME_PERIOD = re.compile(r"_(\d{4})_(\d{2})_")
+# Год и месяц в имени файла выгрузки: «0615106_12_12_2269_2025_1.xml» — последние
+# два числа. Ведущего нуля у месяца в настоящих комплектах нет, и числа может не
+# разделять ничего, кроме конца имени, поэтому хвост описан явно.
+_FILENAME_PERIOD = re.compile(r"_((?:19|20)\d{2})_(\d{1,2})(?=[._]|$)")
 
 
 def month_name(number: int) -> Optional[str]:
@@ -42,7 +44,23 @@ def month_from_period(period: str) -> Optional[str]:
     return month_name(int(digits[-2:]))
 
 
-def month_from_meta_filename(path: str) -> Optional[str]:
-    """Резерв: месяц из имени файла вида `_ГГГГ_ММ_`."""
-    found = _FILENAME_PERIOD.search(str(path).replace("\\", "/"))
-    return month_name(int(found.group(2))) if found else None
+def period_from_meta_filename(path: str) -> Tuple[Optional[str], Optional[int]]:
+    """Резерв: месяц и год из имени файла — его последние два числа.
+
+    Выгрузка называет файл `КОД_ФОРМА_ПЕРИОД_ПРЕДПРИЯТИЕ_ГОД_МЕСЯЦ.xml`, и год с
+    месяцем стоят в самом конце: `0615106_12_12_2269_2025_1.xml` — январь 2025.
+    Год прежде из имени не читался вовсе, а месяц требовал двух цифр и хвостового
+    подчёркивания — то есть у настоящих файлов не находился никогда.
+
+    Берётся последняя подходящая пара: в имени перед ней стоят номер формы, код
+    периодичности и код предприятия, и любое из этих чисел на год не похоже, но
+    заглядывать за конец имени незачем.
+    """
+    found = list(_FILENAME_PERIOD.finditer(str(path).replace("\\", "/")))
+    if not found:
+        return None, None
+    year, month = found[-1].group(1), found[-1].group(2)
+    name = month_name(int(month))
+    # Год без месяца не берётся: пара разобрана не та, и половина периода,
+    # вытащенная из имени наугад, хуже, чем вопрос пользователю (DATA-2).
+    return (name, int(year)) if name else (None, None)

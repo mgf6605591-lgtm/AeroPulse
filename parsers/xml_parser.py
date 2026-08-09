@@ -21,7 +21,7 @@ from typing import Any, Dict, List, Optional
 
 from parsers.base_parser import BaseParser
 from utils.ga12_layout import GA12_ROW_BY_XML_ROW
-from utils.months import month_from_meta_filename, month_from_period
+from utils.months import month_from_period, period_from_meta_filename
 
 # Коды строк, названия, единицы измерения и раздел — из общей таблицы бланка
 # (utils/ga12_layout.py). Своя копия карты строк здесь и раскладка по индексам
@@ -71,12 +71,19 @@ class XMLParser(BaseParser):
 
         period = root.get("period") or ""
 
+        # Титул отчёта называет предприятие и его код: `okpo` здесь — код
+        # предприятия из справочника выгрузки (четыре цифры), а не ОКПО из
+        # атрибута корня. Он пригодится, если авиакомпанию придётся заводить:
+        # свой код у неё есть, и выдумывать его не нужно.
         org_name = ""
+        org_code = ""
         for item in root.findall(".//title/item"):
-            if item.get("name") == "name":
-                raw = item.get("value") or ""
-                org_name = raw.replace("&quot;", '"').strip()
-                break
+            field = item.get("name") or item.get("field")
+            raw = (item.get("value") or "").replace("&quot;", '"').strip()
+            if field == "name":
+                org_name = raw
+            elif field == "okpo":
+                org_code = raw
 
         if entity_name:
             airline_name = entity_name.strip()
@@ -85,8 +92,9 @@ class XMLParser(BaseParser):
         else:
             airline_name = ""
 
-        month_res = month or month_from_period(period) or month_from_meta_filename(file_name)
-        year_res = year if year is not None else file_year
+        name_month, name_year = period_from_meta_filename(file_name)
+        month_res = month or month_from_period(period) or name_month
+        year_res = year if year is not None else (file_year or name_year)
         # Заглушек «январь 2025» здесь нет: неопределённый период возвращается как None,
         # решение принимает вызывающий код (DATA-2).
 
@@ -103,6 +111,7 @@ class XMLParser(BaseParser):
             "airline": {
                 "name": airline_name,
                 "id": entity_id,
+                "code": org_code,
             },
             "month": month_res,
             "year": year_res,

@@ -21,9 +21,9 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from db.models.enums import Months
 from utils.months import (
     MONTH_NAMES,
-    month_from_meta_filename,
     month_from_period,
     month_name,
+    period_from_meta_filename,
 )
 
 try:
@@ -94,12 +94,39 @@ class MonthFromXmlTest(unittest.TestCase):
         for value in ("", None, "abc", "0", "2025", "202513", "202500"):
             self.assertIsNone(month_from_period(value), value)
 
-    def test_month_is_taken_from_the_file_name_as_a_fallback(self):
-        self.assertEqual("March", month_from_meta_filename("f15_2025_03_meta.xml"))
-        self.assertEqual("March", month_from_meta_filename(r"C:\reports\f15_2025_03_meta.xml"))
+    def test_period_is_taken_from_the_file_name_as_a_fallback(self):
+        self.assertEqual(("March", 2025), period_from_meta_filename("f15_2025_03_meta.xml"))
+        self.assertEqual(
+            ("March", 2025), period_from_meta_filename(r"C:\reports\f15_2025_03_meta.xml")
+        )
+
+    def test_the_last_two_numbers_of_a_real_export_are_the_period(self):
+        """Имя выгрузки кончается годом и месяцем, и ведущего нуля у месяца нет.
+
+        `0615106_12_12_2269_2025_1.xml` — 12-ГА АО «Авиакомпания АЛРОСА» за январь
+        2025. Разбор требовал двух цифр месяца и подчёркивания за ними, поэтому у
+        настоящих файлов не срабатывал ни разу, а год из имени не читался вовсе.
+        """
+        self.assertEqual(
+            ("January", 2025), period_from_meta_filename("0615106_12_12_2269_2025_1.xml")
+        )
+        self.assertEqual(
+            ("December", 2025), period_from_meta_filename("0615107_15_12_293_2025_12.xml")
+        )
+
+    def test_numbers_before_the_period_are_not_mistaken_for_it(self):
+        """Перед годом стоят номер формы, код периодичности и код предприятия."""
+        self.assertEqual(
+            ("May", 2025), period_from_meta_filename("0615106_12_12_2542_2025_5.xml")
+        )
 
     def test_file_name_without_a_period_gives_nothing(self):
-        self.assertIsNone(month_from_meta_filename("f15_meta.xml"))
+        self.assertEqual((None, None), period_from_meta_filename("f15_meta.xml"))
+
+    def test_a_number_that_is_not_a_month_is_not_a_period(self):
+        """Год без месяца не берётся: разобрана не та пара, и это видно."""
+        self.assertEqual((None, None), period_from_meta_filename("f15_2025_13.xml"))
+        self.assertEqual((None, None), period_from_meta_filename("f15_2025_0.xml"))
 
 
 @unittest.skipUnless(HAS_QT, "PyQt6 не установлен")

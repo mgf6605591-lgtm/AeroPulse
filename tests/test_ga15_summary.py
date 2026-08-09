@@ -33,7 +33,7 @@ from tests.support import (
     ga15_enterprise_cell,
     make_ga15_enterprise_workbook,
 )
-from utils.airport_codes import CODE_LENGTH, transliterate, unique_airport_code
+from utils.entity_codes import CODE_LENGTH, transliterate, unique_entity_code
 from utils.ga15_airport_layout import GA15_FILTERED_OUT, GA15_METRIC_TAGS
 from utils.ga15_summary_layout import (
     GA15_SUMMARY_ENTITY_KEY,
@@ -58,14 +58,14 @@ class AirportCodeTest(unittest.TestCase):
         self.assertEqual("SCHUCHE", transliterate("Щучье"))
 
     def test_code_never_outgrows_the_column(self):
-        code = unique_airport_code("Верхневилюйск", set())
+        code = unique_entity_code("Верхневилюйск", set())
 
         self.assertLessEqual(len(code), CODE_LENGTH)
 
     def test_collision_is_resolved_by_a_number(self):
-        taken = {unique_airport_code("Алдан", set())}
+        taken = {unique_entity_code("Алдан", set())}
 
-        second = unique_airport_code("Алданский", taken)
+        second = unique_entity_code("Алданский", taken)
 
         self.assertNotIn(second, taken)
         self.assertLessEqual(len(second), CODE_LENGTH)
@@ -73,12 +73,12 @@ class AirportCodeTest(unittest.TestCase):
     def test_a_long_run_of_collisions_still_ends(self):
         taken = set()
         for _ in range(30):
-            taken.add(unique_airport_code("Алдан", taken))
+            taken.add(unique_entity_code("Алдан", taken))
 
         self.assertEqual(30, len(taken))
 
     def test_a_name_without_letters_still_gets_a_code(self):
-        self.assertTrue(unique_airport_code("—", set()))
+        self.assertTrue(unique_entity_code("—", set()))
 
 
 class SummaryPeriodBlocksTest(unittest.TestCase):
@@ -267,7 +267,7 @@ class EnterpriseImportTest(MigratedDbCase):
         result = self.do_import()
 
         self.assertEqual(
-            {GA15_ENTERPRISE_NAME, "Алдан", "Батагай"}, set(result["created_airports"])
+            {GA15_ENTERPRISE_NAME, "Алдан", "Батагай"}, set(result["created_entities"])
         )
         self.assertIn("Алдан", result["message"])
 

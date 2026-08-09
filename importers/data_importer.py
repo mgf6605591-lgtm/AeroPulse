@@ -9,8 +9,9 @@ from db.models.entities import (
 )
 from db.models.enums import ShippingRegularity, RouteType, Months
 from services import journal_service as journal
-from utils.airport_codes import unique_airport_code
 from utils.constants import GA12_DETAIL_TON_PARENT
+from utils.entity_codes import unique_entity_code
+from utils.entity_names import normalized_entity_name
 import time
 
 
@@ -177,29 +178,11 @@ class DataImporter:
         try:
             indicators_map = cls._resolve_indicators(session, data.get('indicators', []))
 
-            # Получаем авиакомпанию
-            airline_data = data.get('airline', {})
-            airline_id = data.get('entity_id') or airline_data.get('id')
-            
-            if airline_id:
-                airline = session.query(Airline).filter(Airline.id == airline_id).first()
-                if not airline:
-                    return {
-                        'success': False,
-                        'message': f'Авиакомпания с ID {airline_id} не найдена'
-                    }
-            else:
-                airline_name = airline_data.get('name', '')
-                airline = session.query(Airline).filter(
-                    Airline.name == airline_name
-                ).first()
-                
-                if not airline:
-                    return {
-                        'success': False,
-                        'message': f'Авиакомпания "{airline_name}" не найдена в базе данных. Пожалуйста, выберите существующую авиакомпанию.'
-                    }
-            
+            created: List[str] = []
+            airline, error = cls._resolve_airline(session, data, created)
+            if error:
+                return error
+
             month_enum, year, period_error = cls._resolve_period(data)
             if period_error:
                 return period_error
@@ -287,12 +270,87 @@ class DataImporter:
                 removed=total_removed,
             )
 
-            session.commit()
+            result = cls._import_result(
+                total_imported, total_updated, total_removed,
+                created=created, register='авиакомпаний',
+            )
+            if not result.get('success'):
+                # Ни одной строки не прочитано — заводить под неё авиакомпанию не
+                # за что: иначе отказ оставлял бы в справочнике запись из файла,
+                # который в базу не попал.
+                session.rollback()
+                return result
 
-            return cls._import_result(total_imported, total_updated, total_removed)
+            session.commit()
+            return result
 
         except Exception as e:
             return cls._failure(session, e, "авиакомпании")
+
+    @classmethod
+    def _resolve_airline(cls, session, data: dict, created: List[str]) -> Tuple[Optional[Airline], Optional[dict]]:
+        """Авиакомпания отчёта: по id, по названию, иначе заводится.
+
+        Название в отчёте — уставное («Акционерное общество "Авиакомпания
+        "АЛРОСА"»), в справочнике — короткое («АО Авиакомпания АЛРОСА»): сравнение
+        идёт по приведённому виду, иначе рядом с заведённой записью появилась бы
+        вторая и отчётность одной авиакомпании разошлась бы по двум строкам свода.
+
+        Незнакомая авиакомпания заводится, как и аэропорт сводного бланка: годовой
+        комплект приходит сразу на несколько предприятий, и отклонять файл целиком
+        из-за того, что одного из них ещё нет в справочнике, значило бы требовать
+        завести его вручную по названию из того же файла. Заведённые записи
+        перечисляются в отчёте об импорте: молча пополнять справочник нельзя.
+        """
+        airline_data = data.get('airline', {})
+        airline_id = data.get('entity_id') or airline_data.get('id')
+        if airline_id:
+            airline = session.get(Airline, airline_id)
+            if not airline:
+                return None, {
+                    'success': False,
+                    'message': f'Авиакомпания с ID {airline_id} не найдена',
+                }
+            return airline, None
+
+        name = (airline_data.get('name') or '').strip()
+        if not name:
+            return None, {
+                'success': False,
+                'message': 'Предприятие не выбрано, а в файле авиакомпания не названа — '
+                           'импорт отменён, чтобы отчётность не ушла в чужую строку.',
+            }
+
+        airline = cls._airline_by_name(session, name)
+        if airline:
+            return airline, None
+
+        airline = Airline(
+            code=cls._free_airline_code(session, name, airline_data.get('code')),
+            name=name,
+        )
+        session.add(airline)
+        session.flush()
+        created.append(name)
+        return airline, None
+
+    @staticmethod
+    def _airline_by_name(session, name: str) -> Optional[Airline]:
+        """Запись справочника с тем же названием — посимвольно или по приведённому виду."""
+        airlines = session.query(Airline).all()
+        for airline in airlines:
+            if (airline.name or '').strip() == name:
+                return airline
+        wanted = normalized_entity_name(name)
+        for airline in airlines:
+            if wanted and normalized_entity_name(airline.name) == wanted:
+                return airline
+        return None
+
+    @staticmethod
+    def _free_airline_code(session, name: str, preferred: Optional[str]) -> str:
+        codes = {code for (code,) in session.query(Airline.code) if code}
+        return unique_entity_code(name, codes, preferred=preferred)
 
     @staticmethod
     def _drop_vanished_rows(session, existing_rows: dict, touched: set) -> int:
@@ -517,7 +575,7 @@ class DataImporter:
     @staticmethod
     def _free_airport_code(session, name: str) -> str:
         codes = {code for (code,) in session.query(Airport.code) if code}
-        return unique_airport_code(name, codes)
+        return unique_entity_code(name, codes)
 
     @staticmethod
     def _locality_id(session, name: str) -> int:
@@ -626,7 +684,8 @@ class DataImporter:
 
     @staticmethod
     def _import_result(total_imported: int, total_updated: int, total_removed: int = 0,
-                       created: Optional[List[str]] = None) -> dict:
+                       created: Optional[List[str]] = None,
+                       register: str = 'аэропортов') -> dict:
         """Итог импорта. Ноль записей — отказ, а не успех.
 
         Разбор, не нашедший ни одного показателя, возвращал success=True с
@@ -652,12 +711,12 @@ class DataImporter:
         if created:
             # Пополнение справочника называется поимённо: импорт заводит записи
             # сам, и узнавать об этом из справочника задним числом неправильно.
-            message += '. Заведены в справочнике аэропортов: ' + ', '.join(created)
+            message += f'. Заведены в справочнике {register}: ' + ', '.join(created)
         return {
             'success': True,
             'message': message,
             'imported': total_imported,
             'updated': total_updated,
             'removed': total_removed,
-            'created_airports': list(created or ()),
+            'created_entities': list(created or ()),
         }

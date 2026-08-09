@@ -14,7 +14,7 @@ from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
 from parsers.base_parser import BaseParser
-from utils.months import month_from_meta_filename, month_from_period
+from utils.months import month_from_period, period_from_meta_filename
 
 # Код строки XML (f15.xml) → ключ строки в кодах показателей 15ГА-Rxx-...
 F15_XML_ROW_TO_RC: Dict[int, str] = {
@@ -151,8 +151,9 @@ class F15XMLParser(BaseParser):
         else:
             ap_name = ""
 
-        month_res = month or month_from_period(period) or month_from_meta_filename(file_name)
-        year_res = year if year is not None else file_year
+        name_month, name_year = period_from_meta_filename(file_name)
+        month_res = month or month_from_period(period) or name_month
+        year_res = year if year is not None else (file_year or name_year)
         # Заглушек «январь 2025» здесь нет: неопределённый период возвращается как None,
         # решение принимает вызывающий код (DATA-2).
 
