@@ -20,17 +20,28 @@ class AirportIndController:
 
     @classmethod
     def aggregate(cls, session, filters: ReportFilters) -> List[Any]:
-        """Ячейки свода 15-ГА одним запросом: сумма по показателю и периоду (PERF-2)."""
+        """Ячейки свода 15-ГА одним запросом: сумма по показателю и периоду (PERF-2).
+
+        Аэропорт входит в группировку: свод по всем аэропортам выводит строку на
+        каждый, и без него они сложились бы в одну. Бланку по одному аэропорту
+        это ничего не меняет — выборка и так сужена до него фильтром.
+        """
         query = (
             select(
                 Indicator.code.label("indicator_code"),
+                AirportIndicators.airport_id.label("airport_id"),
                 AirportIndicators.year.label("year"),
                 AirportIndicators.month.label("month"),
                 func.sum(cast(AirportIndicators.value, Float)).label("total"),
                 func.count().label("records"),
             )
             .join(Indicator, AirportIndicators.indicator_id == Indicator.id)
-            .group_by(Indicator.code, AirportIndicators.year, AirportIndicators.month)
+            .group_by(
+                Indicator.code,
+                AirportIndicators.airport_id,
+                AirportIndicators.year,
+                AirportIndicators.month,
+            )
         )
 
         if filters.airport_ids:

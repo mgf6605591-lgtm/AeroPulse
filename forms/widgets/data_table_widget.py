@@ -155,6 +155,14 @@ class DataTableWidget(QWidget):
                 self.data_table.setColumnWidth(col, 108)
             return
 
+        if stats.get("layout_ga15_summary"):
+            # Первая колонка — название аэропорта, дальше одиннадцать граф бланка
+            # на каждый период: узкие и одинаковые, чтобы периоды читались подряд.
+            self.data_table.setColumnWidth(0, 280)
+            for col in range(1, len(headers)):
+                self.data_table.setColumnWidth(col, 104)
+            return
+
         # Словарь соответствия заголовков и ширины
         width_map = {
             'Показатель': 340,
@@ -248,6 +256,13 @@ class DataTableWidget(QWidget):
                     f"Свод по маршрутам — авиакомпаний: {stats.get('airlines', 0)}, "
                     f"показателей: {stats['indicators']}, месяцев: {stats.get('months', 0)}, "
                     f"записей: {stats.get('records', 0)}"
+                )
+            elif stats.get("layout_ga15_summary"):
+                self.data_count_label.setText(
+                    f"Сводка 15-ГА — аэропортов: {stats.get('airports', 0)}, "
+                    f"из них предприятий с разбивкой: {stats.get('enterprises', 0)}, "
+                    f"периодов: {stats.get('periods', 0)}, "
+                    f"записей в выборке: {stats.get('records', 0)}"
                 )
             elif stats.get("layout_ga15"):
                 an = stats.get("airport_name") or "Аэропорт"

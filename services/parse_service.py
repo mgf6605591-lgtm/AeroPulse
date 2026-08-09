@@ -6,6 +6,7 @@ from parsers.xlsx_parser import XLSXParser
 from parsers.xml_parser import XMLParser
 from parsers.f15_xml_parser import F15XMLParser
 from parsers.f15_xlsx_parser import F15XLSXParser
+from parsers.f15_fkp_xlsx_parser import F15FKPXLSXParser
 
 
 class ParseService:
@@ -35,7 +36,12 @@ class ParseService:
             # Форма выбирается по содержимому книги, а не по тому, что указал
             # пользователь: раньше любой XLSX разбирался раскладкой 12-ГА, и бланк
             # аэропорта молча попадал в отчётность авиакомпании и наоборот (DATA-6).
-            parser = F15XLSXParser if F15XLSXParser.is_f15_workbook(file_path) else XLSXParser
+            #
+            # Сводный бланк предприятия проверяется первым: он тоже относится к
+            # форме 15-ГА, но перечисляет её сразу по всем аэропортам, а разбор
+            # одиночного бланка увидел бы в нём один отчёт с перепутанными
+            # строками.
+            parser = cls._xlsx_parser(file_path)
             return parser.parse_file(
                 file_path,
                 month=month,
@@ -76,3 +82,12 @@ class ParseService:
             )
         else:
             raise ValueError(f"Неподдерживаемый формат файла: {file_path}")
+
+    @staticmethod
+    def _xlsx_parser(file_path: str):
+        """Разбор книги по её содержимому: сводный бланк 15-ГА, одиночный, иначе 12-ГА."""
+        if F15FKPXLSXParser.is_fkp_workbook(file_path):
+            return F15FKPXLSXParser
+        if F15XLSXParser.is_f15_workbook(file_path):
+            return F15XLSXParser
+        return XLSXParser

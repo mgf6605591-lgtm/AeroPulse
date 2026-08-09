@@ -160,22 +160,22 @@ class AirportFilterRefreshTest(WidgetCase):
 
     def test_new_airport_appears_after_reload(self):
         widget = self.make_widget()
-        self.assertEqual(2, widget.airport_combo.count())  # приглашение + аэропорт
+        self.assertEqual(1, len(widget.airport_btn._items))
 
         self.reference.grown = True
         widget.reload_reference_lists()
 
-        self.assertEqual(3, widget.airport_combo.count())
+        self.assertEqual(2, len(widget.airport_btn._items))
 
     def test_chosen_airport_survives_the_reload(self):
         widget = self.make_widget()
-        widget.airport_combo.setCurrentIndex(1)
-        self.assertEqual(10, widget.get_airport_id())
-
+        widget.airport_btn._selected = {10}
         self.reference.grown = True
+
         widget.reload_reference_lists()
 
-        self.assertEqual(10, widget.get_airport_id())
+        # Пока в списке больше одного аэропорта, выбор одного — это отбор, а не «все».
+        self.assertEqual([10], widget.get_airport_filter_ids())
 
     def test_period_survives_the_reload(self):
         """То, что терялось после каждого импорта."""

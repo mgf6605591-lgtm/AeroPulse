@@ -157,10 +157,10 @@ class FilterController:
         )
 
     def get_airport_tab_filters(self, airport_filter_widget) -> ReportFilters:
-        """Отбор вкладки «Аэропорты» (форма 15-ГА): один аэропорт из комбобокса."""
-        aid = airport_filter_widget.get_airport_id()
+        """Отбор вкладки «Аэропорты» (форма 15-ГА): выбранные аэропорты, пусто — все."""
+        ids = airport_filter_widget.get_airport_filter_ids()
         return ReportFilters(
-            airport_ids=() if aid is None else (int(aid),),
+            airport_ids=() if ids is None else tuple(int(x) for x in ids),
             indicator_ids=self._indicator_ids(airport_filter_widget),
             **self._period(airport_filter_widget),
         )

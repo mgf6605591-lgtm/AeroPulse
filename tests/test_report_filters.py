@@ -231,17 +231,22 @@ class ControllerBuildsTypedFiltersTest(unittest.TestCase):
         self.assertEqual((), filters.route_types)
 
     def test_airport_tab_widget_gives_one_airport(self):
-        class AirportTabWidget(FakeFilterWidget):
-            def get_airport_id(self):
-                return 3
-
         filters = self.controller.get_airport_tab_filters(
-            AirportTabWidget(mode=MODE_AIRPORT, indicators=[1])
+            FakeFilterWidget(mode=MODE_AIRPORT, airports=[3], indicators=[1])
         )
 
         self.assertEqual((3,), filters.airport_ids)
         self.assertEqual(3, filters.airport_id)
         self.assertEqual(3, filters.entity_id)
+
+    def test_airport_tab_without_a_choice_asks_for_all(self):
+        """Пустой выбор — это сводка по всем аэропортам, а не пустой отчёт."""
+        filters = self.controller.get_airport_tab_filters(
+            FakeFilterWidget(mode=MODE_AIRPORT, indicators=[1])
+        )
+
+        self.assertEqual((), filters.airport_ids)
+        self.assertIsNone(filters.entity_id)
 
     def test_nothing_chosen_gives_an_empty_selection(self):
         filters = self.controller.get_current_filters(FakeFilterWidget(period=False))

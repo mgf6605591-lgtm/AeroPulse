@@ -111,10 +111,8 @@ class AirportFilterApplyTest(PeriodAppliesByButton, unittest.TestCase):
 
         return AirportFilterWidget()
 
-    def test_choosing_the_airport_still_rebuilds_at_once(self):
-        self.widget.airport_combo.addItem("Аэропорт", 1)
-
-        self.widget.airport_combo.setCurrentIndex(self.widget.airport_combo.count() - 1)
+    def test_choosing_the_airports_still_rebuilds_at_once(self):
+        self.widget.airport_btn.selectionChanged.emit()
 
         self.assertEqual(1, len(self.rebuilds))
 

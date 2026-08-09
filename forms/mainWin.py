@@ -26,7 +26,7 @@ from controllers.filter_controller import FilterController
 from forms.widgets.filter_widget import FilterWidget
 from forms.widgets.airport_filter_widget import AirportFilterWidget
 from forms.widgets.data_table_widget import DataTableWidget
-from forms.widgets.import_dialog import ImportDialog
+from forms.widgets.import_dialog import ENTITY_FROM_FILE, ImportDialog
 from forms.widgets.reference_dialog import ReferenceDialog
 from forms.import_runner import ImportRunner
 from forms.table_export import export_table_to_excel
@@ -187,7 +187,7 @@ class MainWindow(QMainWindow):
         entity_type = dialog.get_type()
         entity_id = dialog.get_entity_id()
 
-        if not entity_id:
+        if not entity_id and not dialog.entity_from_file():
             QMessageBox.warning(self, "Предупреждение", "Не выбрано предприятие")
             return
 
@@ -267,13 +267,20 @@ class MainWindow(QMainWindow):
         self._load_initial_data()
 
     def refresh_entities(self, entity_type: str, combo_box):
-        """Обновляет список предприятий в диалоге"""
+        """Обновляет список предприятий в диалоге.
+
+        У аэропортов список открывается пунктом «из файла». Бланк 15-ГА называет
+        свой аэропорт сам, а сводный бланк предприятия — сразу все свои: выбрать
+        из них одно нельзя, и без этого пункта первый же присланный комплект
+        нельзя было бы загрузить, пока справочник пуст.
+        """
+        combo_box.clear()
         if entity_type == 'airline':
             entities = ImportService.get_airlines()
         else:
             entities = ImportService.get_airports()
+            combo_box.addItem("— предприятие из файла —", ENTITY_FROM_FILE)
 
-        combo_box.clear()
         for entity_id, entity_name in entities:
             combo_box.addItem(entity_name, entity_id)
         combo_box.setEnabled(True)

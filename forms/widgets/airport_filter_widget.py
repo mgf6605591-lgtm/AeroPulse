@@ -17,7 +17,14 @@ from utils.constants import APPLY_CAPTION, MODE_AIRPORT
 
 
 class AirportFilterWidget(PeriodSelectorMixin, QGroupBox):
-    """Фильтры вкладки аэропортов: один аэропорт из выпадающего списка, показатели, период."""
+    """Фильтры вкладки аэропортов: аэропорты, показатели, период.
+
+    Аэропорты выбираются множественно — той же кнопкой, что и авиакомпании на
+    соседней вкладке. Пустой выбор означает «все»: вкладка открывается сводкой по
+    всем аэропортам, а не приглашением выбрать один. Прежде здесь стоял
+    выпадающий список с единственным выбором, и до первого выбора вкладка не
+    показывала ничего.
+    """
 
     filters_changed = pyqtSignal()
     reset_requested = pyqtSignal()
@@ -33,9 +40,9 @@ class AirportFilterWidget(PeriodSelectorMixin, QGroupBox):
         main = QVBoxLayout(self)
 
         row_filters = QHBoxLayout()
-        self.airport_combo = QComboBox()
-        self.airport_combo.setMinimumWidth(320)
-        self.airport_combo.currentIndexChanged.connect(self._on_filters_changed)
+        self.airport_btn = MultiSelectFilterButton("Аэропорты")
+        self.airport_btn.setMinimumWidth(240)
+        self.airport_btn.selectionChanged.connect(self._on_filters_changed)
 
         self.indicator_btn = MultiSelectFilterButton("Показатели")
         self.indicator_btn.setMinimumWidth(200)
@@ -47,7 +54,7 @@ class AirportFilterWidget(PeriodSelectorMixin, QGroupBox):
         self.reset_btn.clicked.connect(self.reset_requested.emit)
 
         row_filters.addWidget(QLabel("Аэропорт:"))
-        row_filters.addWidget(self.airport_combo)
+        row_filters.addWidget(self.airport_btn)
         row_filters.addWidget(QLabel("Показатель:"))
         row_filters.addWidget(self.indicator_btn)
         row_filters.addStretch()
@@ -79,21 +86,11 @@ class AirportFilterWidget(PeriodSelectorMixin, QGroupBox):
         self._set_default_period()
 
     def _load_airports(self, keep_selection: bool = False):
-        current = self.get_airport_id() if keep_selection else None
-        entities = self.filter_controller.load_entities(MODE_AIRPORT)
-        self.airport_combo.blockSignals(True)
-        try:
-            self.airport_combo.clear()
-            self.airport_combo.addItem("— выберите аэропорт —", None)
-            for eid, label in entities:
-                self.airport_combo.addItem(label, int(eid))
-            if current is not None:
-                for i in range(self.airport_combo.count()):
-                    if self.airport_combo.itemData(i) == current:
-                        self.airport_combo.setCurrentIndex(i)
-                        break
-        finally:
-            self.airport_combo.blockSignals(False)
+        # set_items оставляет из выбора только то, что есть в новом списке,
+        # поэтому сохранять выбор отдельно не требуется.
+        self.airport_btn.set_items(self.filter_controller.load_entities(MODE_AIRPORT))
+        if not keep_selection:
+            self.airport_btn.clear_selection()
 
     def _load_indicators(self, keep_selection: bool = False):
         # set_items оставляет из выбора только то, что есть в новом списке.
@@ -113,14 +110,15 @@ class AirportFilterWidget(PeriodSelectorMixin, QGroupBox):
         self._clear_pending()
         self.filters_changed.emit()
 
-    def get_airport_id(self):
-        return self.airport_combo.currentData()
+    def get_airport_filter_ids(self):
+        """None — все аэропорты (сводка); иначе список id."""
+        return self.airport_btn.filter_active_ids()
 
     def get_indicator_filter_ids(self):
         return self.indicator_btn.filter_active_ids()
 
     def reset_filters(self):
-        self.airport_combo.setCurrentIndex(0)
+        self.airport_btn.clear_selection()
         self.indicator_btn.clear_selection()
         # Сброс возвращает то же умолчание, что и первое открытие.
         self._set_default_period()
@@ -129,7 +127,7 @@ class AirportFilterWidget(PeriodSelectorMixin, QGroupBox):
         """Перечитать справочники, сохранив выбор аэропорта, показателей и период.
 
         Прежний метод вызывал `_load_lists()` целиком: он честно возвращал
-        выбранный аэропорт, но молча сбрасывал период на умолчание и снимал
+        выбранные аэропорты, но молча сбрасывал период на умолчание и снимал
         фильтр показателей, хотя обновить требовалось только справочники (BUG-25).
         Сброс кеша здесь не делается — он общий и сбрасывается один раз тем, кто
         менял данные (BUG-7).

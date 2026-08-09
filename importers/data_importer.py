@@ -1,13 +1,15 @@
 # importers/data_importer.py
 from decimal import Decimal
+from typing import Any, Dict, List, Optional, Tuple
 from sqlalchemy.exc import OperationalError, IntegrityError
 from db.database import get_session
 from db.models.entities import (
-    Airline, Airport, Indicator, Shipping, Route,
+    Airline, Airport, Indicator, Locality, Shipping, Route,
     AirlineIndicators, AirportIndicators
 )
 from db.models.enums import ShippingRegularity, RouteType, Months
 from services import journal_service as journal
+from utils.airport_codes import unique_airport_code
 from utils.constants import GA12_DETAIL_TON_PARENT
 import time
 
@@ -39,7 +41,7 @@ class DataImporter:
             return cls._import_airline_data(session, data)
         if "airline" in data:
             return cls._import_airline_data(session, data)
-        if "airport" in data:
+        if "airport" in data or "airports" in data:
             return cls._import_airport_data(session, data)
         return {
             "success": False,
@@ -106,11 +108,15 @@ class DataImporter:
                 detail.parent_id = parent_id
 
     @classmethod
-    def _resolve_indicators(cls, session, data: dict) -> dict:
+    def _resolve_indicators(cls, session, indicators: list) -> dict:
         """Показатели файла: найденные в справочнике либо созданные.
 
         Блок был скопирован в обе ветки импорта дословно, вместе с ошибкой
         приоритета операторов в подстановке кода (BUG-1).
+
+        Принимает сами строки показателей, а не разобранный файл целиком:
+        сводный бланк 15-ГА везёт по набору строк на каждый аэропорт, и
+        справочник должен читаться один раз на файл, а не на аэропорт.
         """
         indicators_map = {}
 
@@ -124,7 +130,7 @@ class DataImporter:
             if row.name:
                 by_name.setdefault(row.name, row)
 
-        for indicator_data in data.get('indicators', []):
+        for indicator_data in indicators:
             code = indicator_data.get('indicator_code') or indicator_data.get('code')
             name = indicator_data.get('indicator_name') or indicator_data.get('name')
             measure = indicator_data.get('measure', '')
@@ -169,7 +175,7 @@ class DataImporter:
     def _import_airline_data(cls, session, data: dict) -> dict:
         """Импорт данных для авиакомпаний"""
         try:
-            indicators_map = cls._resolve_indicators(session, data)
+            indicators_map = cls._resolve_indicators(session, data.get('indicators', []))
 
             # Получаем авиакомпанию
             airline_data = data.get('airline', {})
@@ -380,99 +386,217 @@ class DataImporter:
             'message': f'Неожиданная ошибка при импорте данных {whose}: {error}',
         }
 
+    @staticmethod
+    def _airport_blocks(data: dict) -> List[Dict[str, Any]]:
+        """Отчётность файла, разложенная по аэропортам.
+
+        Обычный бланк 15-ГА заполняется на один аэропорт, сводный — на всё
+        предприятие сразу: блок самого предприятия и по блоку на каждый его
+        аэропорт. Обе формы приводятся к одному виду, чтобы запись шла одним
+        путём: разница между ними — только в числе блоков.
+        """
+        blocks = data.get('airports')
+        if blocks:
+            return [dict(block) for block in blocks]
+
+        airport_data = data.get('airport', {})
+        return [{
+            'name': airport_data.get('name', ''),
+            'id': data.get('entity_id') or airport_data.get('id'),
+            'parent_name': None,
+            'indicators': data.get('indicators', []),
+        }]
+
     @classmethod
     def _import_airport_data(cls, session, data: dict) -> dict:
-        """Импорт данных для аэропортов"""
+        """Импорт данных для аэропортов (одного или всех аэропортов предприятия)."""
         try:
-            indicators_map = cls._resolve_indicators(session, data)
-
-            # Получаем аэропорт
-            airport_data = data.get('airport', {})
-            airport_id = data.get('entity_id') or airport_data.get('id')
-            
-            if airport_id:
-                airport = session.query(Airport).filter(Airport.id == airport_id).first()
-                if not airport:
-                    return {
-                        'success': False,
-                        'message': f'Аэропорт с ID {airport_id} не найден'
-                    }
-            else:
-                airport_name = airport_data.get('name', '')
-                airport = session.query(Airport).filter(
-                    Airport.name == airport_name
-                ).first()
-                
-                if not airport:
-                    return {
-                        'success': False,
-                        'message': f'Аэропорт "{airport_name}" не найден в базе данных. Пожалуйста, выберите существующий аэропорт.'
-                    }
-            
             month_enum, year, period_error = cls._resolve_period(data)
             if period_error:
                 return period_error
 
-            total_imported = 0
-            total_updated = 0
-
-            # Строки периода читаются одним запросом, а не по одному на показатель.
-            existing_rows = cls._existing_airport_rows(session, airport.id, month_enum, year)
-            touched: set = set()
-
-            for indicator_data in data.get('indicators', []):
-                code = indicator_data.get('indicator_code') or indicator_data.get('code')
-                name = indicator_data.get('indicator_name') or indicator_data.get('name')
-
-                indicator = indicators_map.get((code, name))
-                if not indicator:
-                    continue
-
-                value = indicator_data.get('value')
-                if value is None:
-                    continue
-                
-                value = _exact_decimal(value)
-
-                touched.add(indicator.id)
-                existing = existing_rows.get(indicator.id)
-                if existing is not None:
-                    existing.value = value
-                    total_updated += 1
-                else:
-                    airport_ind = AirportIndicators(
-                        indicator_id=indicator.id,
-                        airport_id=airport.id,
-                        month=month_enum,
-                        year=year,
-                        value=value
-                    )
-                    session.add(airport_ind)
-                    existing_rows[indicator.id] = airport_ind
-                    total_imported += 1
-
-            total_removed = cls._drop_vanished_rows(session, existing_rows, touched)
-
-            journal.record_safely(
-                session,
-                kind=journal.KIND_IMPORT,
-                source_file=data.get('source_file'),
-                entity_type='airport',
-                entity_id=airport.id,
-                entity_name=airport.name.strip(),
-                month=month_enum,
-                year=year,
-                imported=total_imported,
-                updated=total_updated,
-                removed=total_removed,
+            blocks = cls._airport_blocks(data)
+            indicators_map = cls._resolve_indicators(
+                session, [row for block in blocks for row in block.get('indicators', [])]
             )
 
-            session.commit()
+            airports: Dict[str, Airport] = {}
+            created: List[str] = []
+            for block in blocks:
+                airport, error = cls._resolve_airport(session, block, created)
+                if error:
+                    return error
+                airports[block.get('name', '')] = airport
+                block['airport'] = airport
 
-            return cls._import_result(total_imported, total_updated, total_removed)
+            cls._link_airport_parents(blocks, airports)
+
+            total_imported = 0
+            total_updated = 0
+            total_removed = 0
+
+            for block in blocks:
+                imported, updated, removed = cls._write_airport_block(
+                    session, block, indicators_map, month_enum, year
+                )
+                total_imported += imported
+                total_updated += updated
+                total_removed += removed
+
+                journal.record_safely(
+                    session,
+                    kind=journal.KIND_IMPORT,
+                    source_file=data.get('source_file'),
+                    entity_type='airport',
+                    entity_id=block['airport'].id,
+                    entity_name=block['airport'].name.strip(),
+                    month=month_enum,
+                    year=year,
+                    imported=imported,
+                    updated=updated,
+                    removed=removed,
+                )
+
+            result = cls._import_result(
+                total_imported, total_updated, total_removed, created=created
+            )
+            if not result.get('success'):
+                # Ни одной строки не прочитано — заводить под неё аэропорты не за
+                # что: иначе отказ оставлял бы в справочнике записи из файла,
+                # который в базу не попал.
+                session.rollback()
+                return result
+
+            session.commit()
+            return result
 
         except Exception as e:
             return cls._failure(session, e, "аэропорта")
+
+    @classmethod
+    def _resolve_airport(cls, session, block: dict, created: List[str]) -> Tuple[Optional[Airport], Optional[dict]]:
+        """Аэропорт блока: по id, по названию, иначе заводится.
+
+        Сводный бланк называет тридцать с лишним аэропортов, и требовать, чтобы
+        все они уже стояли в справочнике, значило бы отклонять первый же
+        присланный комплект целиком. Заведённые записи перечисляются в отчёте об
+        импорте: молча пополнять справочник тоже нельзя.
+        """
+        airport_id = block.get('id')
+        if airport_id:
+            airport = session.get(Airport, airport_id)
+            if not airport:
+                return None, {
+                    'success': False,
+                    'message': f'Аэропорт с ID {airport_id} не найден',
+                }
+            return airport, None
+
+        name = (block.get('name') or '').strip()
+        if not name:
+            return None, {
+                'success': False,
+                'message': 'В файле есть блок без названия аэропорта — импорт отменён, '
+                           'чтобы отчётность не ушла в чужую строку.',
+            }
+
+        airport = session.query(Airport).filter(Airport.name == name).first()
+        if airport:
+            return airport, None
+
+        airport = Airport(
+            code=cls._free_airport_code(session, name),
+            name=name,
+            locality_id=cls._locality_id(session, name),
+        )
+        session.add(airport)
+        session.flush()
+        created.append(name)
+        return airport, None
+
+    @staticmethod
+    def _free_airport_code(session, name: str) -> str:
+        codes = {code for (code,) in session.query(Airport.code) if code}
+        return unique_airport_code(name, codes)
+
+    @staticmethod
+    def _locality_id(session, name: str) -> int:
+        """Населённый пункт для заводимого аэропорта.
+
+        Бланк населённого пункта не называет, а колонка обязательна. Берётся
+        название самого аэропорта: для «Алдана» или «Батагая» это и есть правда,
+        а для предприятия — заметная заглушка, которую видно в справочнике и
+        которую там же можно исправить.
+        """
+        locality = session.query(Locality).filter(Locality.name == name).first()
+        if locality is None:
+            locality = Locality(name=name)
+            session.add(locality)
+            session.flush()
+        return locality.id
+
+    @staticmethod
+    def _link_airport_parents(blocks: List[dict], airports: Dict[str, Airport]) -> None:
+        """Проставляет предприятие, в состав которого входит аэропорт.
+
+        Состав предприятия берётся из файла: он его и сдаёт. Ручная перестановка
+        в справочниках держится ровно до следующей загрузки сводного бланка —
+        иначе свод показывал бы не тот состав, что в присланном отчёте.
+        """
+        for block in blocks:
+            parent_name = block.get('parent_name')
+            if not parent_name:
+                continue
+            parent = airports.get(parent_name)
+            if parent is None or parent.id == block['airport'].id:
+                continue
+            block['airport'].parent_id = parent.id
+
+    @classmethod
+    def _write_airport_block(cls, session, block: dict, indicators_map: dict,
+                             month_enum, year: int) -> Tuple[int, int, int]:
+        """Строки одного аэропорта за период. Возвращает (добавлено, обновлено, удалено)."""
+        airport = block['airport']
+        imported = 0
+        updated = 0
+
+        # Строки периода читаются одним запросом, а не по одному на показатель.
+        existing_rows = cls._existing_airport_rows(session, airport.id, month_enum, year)
+        touched: set = set()
+
+        for indicator_data in block.get('indicators', []):
+            code = indicator_data.get('indicator_code') or indicator_data.get('code')
+            name = indicator_data.get('indicator_name') or indicator_data.get('name')
+
+            indicator = indicators_map.get((code, name))
+            if not indicator:
+                continue
+
+            value = indicator_data.get('value')
+            if value is None:
+                continue
+
+            value = _exact_decimal(value)
+
+            touched.add(indicator.id)
+            existing = existing_rows.get(indicator.id)
+            if existing is not None:
+                existing.value = value
+                updated += 1
+            else:
+                airport_ind = AirportIndicators(
+                    indicator_id=indicator.id,
+                    airport_id=airport.id,
+                    month=month_enum,
+                    year=year,
+                    value=value
+                )
+                session.add(airport_ind)
+                existing_rows[indicator.id] = airport_ind
+                imported += 1
+
+        removed = cls._drop_vanished_rows(session, existing_rows, touched)
+        return imported, updated, removed
 
     @staticmethod
     def _resolve_period(data: dict):
@@ -501,7 +625,8 @@ class DataImporter:
         return month_enum, int(year), None
 
     @staticmethod
-    def _import_result(total_imported: int, total_updated: int, total_removed: int = 0) -> dict:
+    def _import_result(total_imported: int, total_updated: int, total_removed: int = 0,
+                       created: Optional[List[str]] = None) -> dict:
         """Итог импорта. Ноль записей — отказ, а не успех.
 
         Разбор, не нашедший ни одного показателя, возвращал success=True с
@@ -524,10 +649,15 @@ class DataImporter:
             message += (
                 f'. Удалено строк, которых нет в новом отчёте: {total_removed}'
             )
+        if created:
+            # Пополнение справочника называется поимённо: импорт заводит записи
+            # сам, и узнавать об этом из справочника задним числом неправильно.
+            message += '. Заведены в справочнике аэропортов: ' + ', '.join(created)
         return {
             'success': True,
             'message': message,
             'imported': total_imported,
             'updated': total_updated,
             'removed': total_removed,
+            'created_airports': list(created or ()),
         }

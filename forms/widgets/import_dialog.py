@@ -5,6 +5,14 @@ from PyQt6.QtWidgets import (
 )
 
 
+# Признак того, что предприятие названо в самом файле. Сводный бланк 15-ГА
+# перечисляет тридцать с лишним аэропортов сразу, и выбрать из них одно нельзя;
+# отдельный бланк тоже называет свой аэропорт. Значение непустое намеренно:
+# `accept()` не пропускает элементы без данных, потому что ими выглядят строки,
+# набранные в поле руками (BUG-19).
+ENTITY_FROM_FILE = "from_file"
+
+
 class ImportDialog(QDialog):
     """Диалог выбора параметров импорта"""
 
@@ -108,5 +116,10 @@ class ImportDialog(QDialog):
         return self.type_combo.currentData()
     
     def get_entity_id(self) -> int:
-        """Возвращает ID выбранного предприятия"""
-        return self.entity_combo.currentData()
+        """ID выбранного предприятия; None — предприятие берётся из файла."""
+        data = self.entity_combo.currentData()
+        return None if data == ENTITY_FROM_FILE else data
+
+    def entity_from_file(self) -> bool:
+        """Выбран ли пункт «предприятие из файла»."""
+        return self.entity_combo.currentData() == ENTITY_FROM_FILE

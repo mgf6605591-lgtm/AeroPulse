@@ -50,6 +50,11 @@ class Column:
 
     key: str
     label: str
+    # Справочник, на который ссылается колонка: из него берётся подпись вместо id.
+    # Ключ колонки для этого не годится — `parent_id` есть и у показателя
+    # (родительская строка бланка), и у аэропорта (предприятие), и подписи для
+    # них лежат в разных справочниках.
+    ref: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -128,12 +133,23 @@ KINDS: Dict[str, Kind] = {
         columns=(
             Column("code", "Код"),
             Column("name", "Название"),
-            Column("locality_id", "Населённый пункт"),
+            Column("locality_id", "Населённый пункт", ref="locality"),
+            Column("parent_id", "Входит в предприятие", ref="airport"),
         ),
         fields=(
             Field("code", "Код", max_length=5),
             Field("name", "Название", max_length=25),
             Field("locality_id", "Населённый пункт", kind="ref", ref="locality"),
+            # Предприятие, сдающее сводный бланк 15-ГА за свои аэропорты. Пусто
+            # у тех, кто отчитывается сам за себя, — таких большинство.
+            Field(
+                "parent_id",
+                "Входит в предприятие",
+                kind="ref",
+                ref="airport",
+                required=False,
+                allow_empty=True,
+            ),
         ),
         order_by="name",
         has_active=True,
@@ -162,7 +178,7 @@ KINDS: Dict[str, Kind] = {
             Column("code", "Код"),
             Column("name", "Название"),
             Column("measure", "Ед. изм."),
-            Column("parent_id", "Родитель"),
+            Column("parent_id", "Родитель", ref="indicator"),
         ),
         fields=(
             Field("code", "Код", max_length=20),
@@ -211,7 +227,7 @@ class ReferenceService:
                 item: dict = {"id": row.id}
                 for column in kind.columns:
                     value = getattr(row, column.key, None)
-                    item[column.key] = cls._display(column.key, value, labels)
+                    item[column.key] = cls._display(column, value, labels)
                 item["is_active"] = bool(getattr(row, "is_active", True))
                 item["usage"] = kind.usage(session, row.id) if kind.usage else 0
                 out.append(item)
@@ -337,23 +353,31 @@ class ReferenceService:
 
     @classmethod
     def _ref_labels(cls, session) -> Dict[str, Dict[int, str]]:
-        """Подписи для колонок-ссылок: показывать id пользователю бессмысленно."""
+        """Подписи для колонок-ссылок: показывать id пользователю бессмысленно.
+
+        Ключ — справочник, а не колонка: `parent_id` есть у двух справочников
+        сразу, и по имени колонки показатель получил бы подпись аэропорта.
+        """
         return {
-            "locality_id": {
+            "locality": {
                 row.id: (row.name or "").strip()
                 for row in session.query(Locality).all()
             },
-            "parent_id": {
+            "indicator": {
                 row.id: (row.code or "").strip()
                 for row in session.query(Indicator).all()
+            },
+            "airport": {
+                row.id: (row.name or "").strip()
+                for row in session.query(Airport).all()
             },
         }
 
     @staticmethod
-    def _display(column_key: str, value, labels: Dict[str, Dict[int, str]]):
+    def _display(column: Column, value, labels: Dict[str, Dict[int, str]]):
         if value is None:
             return ""
-        mapping = labels.get(column_key)
+        mapping = labels.get(column.ref) if column.ref else None
         if mapping is not None:
             return mapping.get(value, f"#{value}")
         return value

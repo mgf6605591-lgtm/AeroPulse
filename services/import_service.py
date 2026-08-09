@@ -34,7 +34,7 @@ class ImportService:
                     entity = session.get(Airline, entity_id)
                 else:
                     entity = session.get(Airport, entity_id)
-                
+
                 if not entity:
                     return {
                         'success': False,
@@ -48,18 +48,17 @@ class ImportService:
                     entity = session.query(Airline).filter(Airline.name == entity_name).first()
                 else:
                     entity = session.query(Airport).filter(Airport.name == entity_name).first()
-                
+
                 if not entity:
                     return {
                         'success': False,
                         'message': f'Предприятие "{entity_name}" не найдено в базе данных.'
                     }
                 entity_id = entity.id
-        else:
-            return {
-                'success': False,
-                'message': 'Не указано предприятие для импорта данных.'
-            }
+        # Предприятие не выбрано — назвать его должен сам файл. Отказ переносится
+        # на после разбора: только там видно, есть ли в файле название. Отказывать
+        # заранее значило бы не принимать сводный бланк 15-ГА, который называет
+        # сразу все аэропорты предприятия и одному из них не принадлежит.
 
         # Парсинг файла с передачей информации о предприятии
         try:
@@ -102,6 +101,15 @@ class ImportService:
                 'source_file': os.path.basename(file_path),
             }
 
+        if not entity_id and not cls._names_its_own_entity(data):
+            return {
+                'success': False,
+                'message': 'Предприятие не выбрано, а в файле оно не названо. '
+                           'Выберите предприятие в списке или загрузите бланк, '
+                           'который называет своё предприятие сам.',
+                'source_file': os.path.basename(file_path),
+            }
+
         # Отчётный период обязателен. Раньше парсер молча подставлял «январь 2025»,
         # и upsert по ключу (показатель, рейс, месяц, год) затирал настоящие январские
         # данные значениями чужого месяца — без резервной копии и следа в журнале (DATA-2).
@@ -131,6 +139,21 @@ class ImportService:
             result["sheet_name"] = data.get("sheet_name")
         return result
     
+    @staticmethod
+    def _names_its_own_entity(data: dict) -> bool:
+        """Есть ли в разобранном файле название предприятия.
+
+        Сводный бланк везёт список аэропортов, отдельный — одно название в шапке.
+        Пустое название означает, что подставить предприятие неоткуда.
+        """
+        blocks = data.get('airports')
+        if blocks:
+            return all((block.get('name') or '').strip() for block in blocks)
+        for key in ('airport', 'airline'):
+            if (data.get(key) or {}).get('name', '').strip():
+                return True
+        return False
+
     @classmethod
     def get_airlines(cls) -> list:
         """Действующие авиакомпании с ID.
