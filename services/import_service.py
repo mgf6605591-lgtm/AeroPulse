@@ -12,9 +12,9 @@ class ImportService:
     """Сервис для импорта данных"""
 
     @classmethod
-    def import_file(cls, file_path: str, entity_type: str = None, entity_id: int = None,
-                    entity_name: str = None, month: str = None,
-                    year: int = None) -> ImportOutcome:
+    def import_file(cls, file_path: str, entity_type: str | None = None, entity_id: int | None = None,
+                    entity_name: str | None = None, month: str | None = None,
+                    year: int | None = None) -> ImportOutcome:
         """
         Парсит файл и импортирует данные в БД.
         

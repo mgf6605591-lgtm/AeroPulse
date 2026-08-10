@@ -34,7 +34,7 @@ FALLBACK = "AP"
 
 def transliterate(name: str) -> str:
     """Латинские буквы и цифры названия заглавными; всё прочее отбрасывается."""
-    out = []
+    out: list[str] = []
     for char in str(name or "").lower():
         replacement = CYRILLIC_TO_LATIN.get(char, char)
         out.extend(c for c in replacement.upper() if c.isascii() and c.isalnum())

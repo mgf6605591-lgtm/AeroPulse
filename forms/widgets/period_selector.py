@@ -19,8 +19,9 @@
 from datetime import date
 from collections.abc import Sequence
 
-from PyQt6.QtWidgets import QComboBox
+from PyQt6.QtWidgets import QComboBox, QPushButton
 
+from controllers.filter_controller import FilterController
 from utils.constants import APPLY_CAPTION, APPLY_CAPTION_PENDING, MONTHS_RU
 
 
@@ -42,10 +43,20 @@ def year_choices(data_range: tuple[int, int] | None, today_year: int) -> list[in
 class PeriodSelectorMixin:
     """Поведение периода для виджета фильтров.
 
-    Виджет обязан завести `self.from_month`, `self.from_year`, `self.to_month`,
-    `self.to_year`, `self.apply_btn` и `self.filter_controller` — и позвать
+    Виджет обязан завести перечисленные ниже поля и позвать
     `_init_period_combos()` после того, как комбобоксы созданы.
     """
+
+    # Объявления без значений: сам миксин их не создаёт, но пользуется всеми.
+    # Прежде требование было записано прозой в этой строке документации — то есть
+    # проверялось чтением. Здесь оно объявлено и проверяется анализатором:
+    # виджет, забывший завести `apply_btn`, виден до запуска (INFRA-7).
+    from_month: QComboBox
+    from_year: QComboBox
+    to_month: QComboBox
+    to_year: QComboBox
+    apply_btn: QPushButton
+    filter_controller: FilterController
 
     def _period_combos(self) -> Sequence[QComboBox]:
         return (self.from_month, self.from_year, self.to_month, self.to_year)

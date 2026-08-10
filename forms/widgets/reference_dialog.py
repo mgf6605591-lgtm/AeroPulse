@@ -45,7 +45,7 @@ class ReferenceEditor(QDialog):
                 # (показатель не может быть себе родителем). Для ссылки на чужой
                 # справочник тот же id — совсем другая запись, и вычёркивать её нельзя.
                 exclude = self.row_id if field.ref == self.kind.key else None
-                for ref_id, label in ReferenceService.choices(field.ref, exclude_id=exclude):
+                for ref_id, label in ReferenceService.choices(field.ref or "", exclude_id=exclude):
                     combo.addItem(label, ref_id)
                 current = values.get(field.name)
                 if current is not None:
@@ -112,7 +112,7 @@ class ReferenceTab(QWidget):
         buttons.addWidget(self.delete_btn)
 
         if self.kind.has_active:
-            self.active_btn = QPushButton("Вывести из работы")
+            self.active_btn: QPushButton | None = QPushButton("Вывести из работы")
             self.active_btn.clicked.connect(self.toggle_active)
             buttons.addWidget(self.active_btn)
         else:
@@ -152,13 +152,13 @@ class ReferenceTab(QWidget):
                 c += 1
             self.table.setItem(r, c, QTableWidgetItem(str(row["usage"])))
 
-        self.table.horizontalHeader().setSectionResizeMode(
-            QHeaderView.ResizeMode.ResizeToContents
-        )
-        if self.kind.columns:
-            self.table.horizontalHeader().setSectionResizeMode(
-                len(self.kind.columns) - 1, QHeaderView.ResizeMode.Stretch
-            )
+        header = self.table.horizontalHeader()
+        if header is not None:
+            header.setSectionResizeMode(QHeaderView.ResizeMode.ResizeToContents)
+            if self.kind.columns:
+                header.setSectionResizeMode(
+                    len(self.kind.columns) - 1, QHeaderView.ResizeMode.Stretch
+                )
         self._update_buttons()
 
     def selected(self) -> dict | None:

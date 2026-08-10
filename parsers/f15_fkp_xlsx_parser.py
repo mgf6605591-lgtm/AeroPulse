@@ -158,7 +158,7 @@ class F15FKPXLSXParser(BaseParser):
     @classmethod
     def _read_sheet(cls, file_name: str) -> tuple[pd.DataFrame, str]:
         df, name = find_sheet(file_name, cls._looks_like_fkp)
-        if df is None:
+        if df is None or name is None:
             raise ValueError(
                 "Не удалось распознать сводный бланк 15-ГА: ни на одном листе книги "
                 f"({', '.join(sheet_names(file_name))}) нет блоков «Название аэропорта» "

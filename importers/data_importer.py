@@ -115,8 +115,8 @@ class DataImporter:
 
         # Справочник показателей читается один раз: прежде на каждую строку файла
         # уходило по одному-двум отдельным запросам (PERF-3).
-        by_code = {}
-        by_name = {}
+        by_code: dict[str, Indicator] = {}
+        by_name: dict[str, Indicator] = {}
         for row in session.query(Indicator).all():
             if row.code:
                 by_code.setdefault(row.code, row)
@@ -172,8 +172,8 @@ class DataImporter:
 
             created: list[str] = []
             airline, error = cls._resolve_airline(session, data, created)
-            if error:
-                return error
+            if airline is None:
+                return error or failure('Авиакомпания отчёта не определена.')
 
             month_enum, year, period_error = cls._resolve_period(data)
             if period_error:
@@ -468,8 +468,8 @@ class DataImporter:
             created: list[str] = []
             for block in blocks:
                 airport, error = cls._resolve_airport(session, block, created)
-                if error:
-                    return error
+                if airport is None:
+                    return error or failure('Аэропорт блока не определён.')
                 airports[block.get('name', '')] = airport
                 block['airport'] = airport
 

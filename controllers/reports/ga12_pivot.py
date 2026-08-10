@@ -301,7 +301,7 @@ def all_airlines(filters: ReportFilters) -> dict[str, Any]:
             if r.code
         }
 
-    airlines = sorted(airlines)
+    airline_names = sorted(airlines)
     periods = sorted_periods(periods_seen) or [EMPTY_PERIOD]
 
     headers = ["Показатель", "Ед. изм.", "Код ОКЕИ"]
@@ -315,7 +315,7 @@ def all_airlines(filters: ReportFilters) -> dict[str, Any]:
         headers.append("Свод")
         keys.append(f"m_{pk}_total")
         col += 1
-        for i, airline in enumerate(airlines):
+        for i, airline in enumerate(airline_names):
             headers.append(airline)
             keys.append(f"m_{pk}_a_{i}")
             col += 1
@@ -325,7 +325,7 @@ def all_airlines(filters: ReportFilters) -> dict[str, Any]:
     known_codes = set(GA12_CODE_ORDER_FLAT)
 
     def fill_cells_for_code(row, section_key, code, ind_name):
-        _fill_airline_columns(row, periods, airlines, ind_by_code.get(code, {}))
+        _fill_airline_columns(row, periods, airline_names, ind_by_code.get(code, {}))
 
     def data_row_for_code(code: str) -> dict[str, Any] | None:
         """Отдельная строка по коду — для раздела «прочие показатели»."""
@@ -337,7 +337,7 @@ def all_airlines(filters: ReportFilters) -> dict[str, Any]:
             "measure": (ind.measure or "").strip(),
             "code": code,
         }
-        _fill_airline_columns(row, periods, airlines, ind_by_code.get(code, {}))
+        _fill_airline_columns(row, periods, airline_names, ind_by_code.get(code, {}))
         return row
 
     def data_row_for_name_nocode(ind_name: str) -> dict[str, Any]:
@@ -346,7 +346,7 @@ def all_airlines(filters: ReportFilters) -> dict[str, Any]:
             "measure": measure_nocode.get(ind_name, ""),
             "code": "",
         }
-        _fill_airline_columns(row, periods, airlines, ind_by_name_nocode.get(ind_name, {}))
+        _fill_airline_columns(row, periods, airline_names, ind_by_name_nocode.get(ind_name, {}))
         return row
 
     # Свод по всем АК не ставит «в том числе» по связи parent_id: строка
@@ -376,7 +376,7 @@ def all_airlines(filters: ReportFilters) -> dict[str, Any]:
         'groups': groups,
         'stats': {
             'indicators': n_data_rows,
-            'airlines': len(airlines),
+            'airlines': len(airline_names),
             'months': period_count(periods),
             'records': n_records
         }
@@ -387,7 +387,9 @@ def _compute_airline_routes_pivot(
     rows: list[Any], filters: ReportFilters | None
 ) -> dict[str, Any]:
     """Общая сетка 12-ГА: месяцы × виды маршрута + ИТОГО (выборка уже по одной АК)."""
-    data = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: Decimal("0"))))
+    data: dict[tuple, dict[tuple, dict[str, Decimal]]] = defaultdict(
+        lambda: defaultdict(lambda: defaultdict(lambda: Decimal("0")))
+    )
     periods_seen: set[tuple] = set()
     name_to_id: dict[str, int] = {}
     n_records = 0
@@ -492,7 +494,7 @@ def multi_airline_by_routes(filters: ReportFilters) -> dict[str, Any]:
         airline_rows = sorted(seen.items(), key=lambda x: x[1])
 
     # (регулярность, имя показателя) -> период -> airline_id -> route_type -> сумма
-    data = defaultdict(
+    data: dict[tuple, dict[tuple, dict[int, dict[str, Decimal]]]] = defaultdict(
         lambda: defaultdict(
             lambda: defaultdict(
                 lambda: defaultdict(lambda: Decimal("0"))
@@ -621,7 +623,9 @@ def per_airline_summary(filters: ReportFilters, airline_id: int) -> dict[str, An
         al = session.get(Airline, airline_id)
         airline_name = al.name.strip() if al else ""
 
-    data = defaultdict(lambda: defaultdict(lambda: defaultdict(lambda: Decimal("0"))))
+    data: dict[tuple, dict[tuple, dict[str, Decimal]]] = defaultdict(
+        lambda: defaultdict(lambda: defaultdict(lambda: Decimal("0")))
+    )
     periods_seen: set[tuple] = set()
     name_to_id: dict[str, int] = {}
     n_records = 0
@@ -641,8 +645,8 @@ def per_airline_summary(filters: ReportFilters, airline_id: int) -> dict[str, An
         for period, rt_dict in md.items():
             # Не `sum(rt_dict.values())`: местные и субсидируемые входят во
             # внутренние, и сумма по всем видам считала бы их дважды.
-            keys = ga12_total_route_types(rt_dict)
-            agg[(_reg_key, _ind_name)][period] += sum(rt_dict[k] for k in keys)
+            total_keys = ga12_total_route_types(rt_dict)
+            agg[(_reg_key, _ind_name)][period] += sum(rt_dict[k] for k in total_keys)
 
     code_to_indicator: dict[str, Indicator] = {}
     with get_session() as session:

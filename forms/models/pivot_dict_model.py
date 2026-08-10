@@ -10,7 +10,7 @@ from decimal import Decimal
 class PivotDictModel(QAbstractTableModel):
     """Модель для сводной (pivot) таблицы. Данные — список словарей (строк)."""
 
-    def __init__(self, data: list[dict] = None, headers: list[str] = None, keys: list[str] = None, parent=None):
+    def __init__(self, data: list[dict] | None = None, headers: list[str] | None = None, keys: list[str] | None = None, parent=None):
         super().__init__(parent)
         self._data = data or []
         self._headers = headers or []

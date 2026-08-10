@@ -45,8 +45,8 @@ GA12_ROUTE_COLUMNS: tuple[tuple[str, tuple[int, ...]], ...] = (
 class XLSXParser(BaseParser):
 
     @classmethod
-    def parse_file(cls, file_name: str, month: str = None, year: int = None,
-                   entity_type: str = None, entity_id: int = None, entity_name: str = None) -> dict:
+    def parse_file(cls, file_name: str, month: str | None = None, year: int | None = None,
+                   entity_type: str | None = None, entity_id: int | None = None, entity_name: str | None = None) -> dict:
         """
         Парсинг файла формы ГА12.
         
@@ -228,7 +228,7 @@ class XLSXParser(BaseParser):
     def _read_ga12_sheet(cls, file_name: str) -> tuple[pd.DataFrame, str]:
         """Находит лист формы 12-ГА и возвращает его вместе с именем."""
         df, name = find_sheet(file_name, cls._looks_like_ga12, cls._name_hints_ga12)
-        if df is None:
+        if df is None or name is None:
             raise ValueError(
                 "Не удалось распознать форму: ни на одном листе книги "
                 f"({', '.join(sheet_names(file_name))}) нет показателей бланка 12-ГА."

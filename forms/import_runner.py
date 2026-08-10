@@ -84,11 +84,11 @@ class ImportRunner(QObject):
         self._entity_id = entity_id
 
         self._index = 0
-        self._results = []
+        self._results: list[ImportOutcome] = []
         self._cancelled = False
         # Период спрашивается не более одного раза на файл: если и с указанным
         # периодом разбор его не увидел, повторять вопрос значило бы зациклиться.
-        self._asked = set()
+        self._asked: set[str] = set()
 
         self._progress = QProgressDialog(
             "Подготовка…", "Отмена", 0, len(self._paths), parent

@@ -100,7 +100,7 @@ def build(filters: ReportFilters, airport_id: int) -> dict[str, Any]:
     # одни только строки 12-ГА. Пустой бланк под заголовком выглядел бы как
     # отчёт без данных, поэтому причина названа прямо.
     if selected is not None and not n_data_lines:
-        note = {k: None for k in GA15_KEYS}
+        note: dict[str, Any] = {k: None for k in GA15_KEYS}
         note[GA15_KEYS[0]] = "Ни один из выбранных показателей не входит в форму 15-ГА."
         pivot_rows.append(note)
 

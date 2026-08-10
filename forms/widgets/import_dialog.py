@@ -118,7 +118,7 @@ class ImportDialog(QDialog):
         """Возвращает тип предприятия ('airline' или 'airport')"""
         return self.type_combo.currentData()
     
-    def get_entity_id(self) -> int:
+    def get_entity_id(self) -> int | None:
         """ID выбранного предприятия; None — предприятие берётся из файла."""
         data = self.entity_combo.currentData()
         return None if data == ENTITY_FROM_FILE else data

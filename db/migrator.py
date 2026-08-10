@@ -31,7 +31,13 @@ def upgrade_to_head(engine) -> None:
     # Alembic о ней не знает. Пересоздавать таблицы нельзя — отмечаем ревизию.
     if tables and "alembic_version" not in tables:
         _adopt_legacy_db(engine)
-        command.stamp(cfg, ScriptDirectory.from_config(cfg).get_base())
+        baseline = ScriptDirectory.from_config(cfg).get_base()
+        if baseline is None:
+            raise RuntimeError(
+                "В поставке нет ни одной ревизии схемы: каталог migrations пуст "
+                "или не попал в сборку."
+            )
+        command.stamp(cfg, baseline)
 
     command.upgrade(cfg, "head")
 

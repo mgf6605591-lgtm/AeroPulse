@@ -8,6 +8,7 @@
 Смена пароля показывается принудительно тем учёткам, чей открытый пароль перевела
 в хеш миграция `b7a4c9f21e05`: само значение к тому моменту уже могло разойтись.
 """
+from forms.widgets.dialog_buttons import set_caption
 from PyQt6.QtWidgets import (
     QDialog, QDialogButtonBox, QFormLayout, QLabel, QLineEdit, QMessageBox,
 )
@@ -63,8 +64,8 @@ class FirstRunDialog(QDialog):
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
-        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Создать")
-        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("Выйти")
+        set_caption(buttons, QDialogButtonBox.StandardButton.Ok, "Создать")
+        set_caption(buttons, QDialogButtonBox.StandardButton.Cancel, "Выйти")
         buttons.accepted.connect(self._submit)
         buttons.rejected.connect(self.reject)
         layout.addRow(buttons)
@@ -145,9 +146,9 @@ class PasswordChangeDialog(QDialog):
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
-        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Сохранить")
+        set_caption(buttons, QDialogButtonBox.StandardButton.Ok, "Сохранить")
         if self.forced:
-            buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("Отменить вход")
+            set_caption(buttons, QDialogButtonBox.StandardButton.Cancel, "Отменить вход")
         buttons.accepted.connect(self._submit)
         buttons.rejected.connect(self.reject)
         layout.addRow(buttons)

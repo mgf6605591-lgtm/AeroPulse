@@ -120,7 +120,7 @@ class AuthService:
             return ok("Учётная запись создана.", account=_snapshot(user))
 
     def change_password(self, user_id: int, new_password: str,
-                        current_password: str = None) -> dict:
+                        current_password: str | None = None) -> dict:
         """Меняет пароль. `current_password` проверяется, если передан."""
         try:
             validate_password(new_password)

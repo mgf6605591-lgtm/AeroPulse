@@ -106,7 +106,7 @@ class F15XLSXParser(BaseParser):
         строк бланка на нём нет, поэтому листом данных он не станет.
         """
         df, name = find_sheet(file_name, cls._looks_like_f15, cls._name_hints_f15)
-        if df is None:
+        if df is None or name is None:
             raise ValueError(
                 "Не удалось распознать форму: ни на одном листе книги "
                 f"({', '.join(sheet_names(file_name))}) нет строк бланка 15-ГА."

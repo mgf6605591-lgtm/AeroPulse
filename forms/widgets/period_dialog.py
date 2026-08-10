@@ -1,6 +1,7 @@
 # forms/widgets/period_dialog.py
 from datetime import date
 
+from forms.widgets.dialog_buttons import set_caption
 from PyQt6.QtWidgets import (
     QComboBox, QDialog, QDialogButtonBox, QFormLayout, QLabel, QSpinBox
 )
@@ -52,7 +53,7 @@ class PeriodDialog(QDialog):
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
-        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("Пропустить файл")
+        set_caption(buttons, QDialogButtonBox.StandardButton.Cancel, "Пропустить файл")
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addRow(buttons)

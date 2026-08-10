@@ -143,7 +143,7 @@ class DataTableWidget(QWidget):
         if ids_to_delete:
             self.delete_requested.emit(ids_to_delete)
     
-    def _set_column_widths_pivot(self, stats: dict, headers: list = None):
+    def _set_column_widths_pivot(self, stats: dict, headers: list | None = None):
         """Устанавливает ширину столбцов для сводной таблицы на основе заголовков"""
         if headers is None:
             return
@@ -305,7 +305,7 @@ class DataTableWidget(QWidget):
         """Группы заголовка (как на экране) для экспорта; для сводной таблицы с группами месяцев."""
         return self.grouped_header.get_groups()
 
-    def export_header(self, user: str = None) -> ExportHeader:
+    def export_header(self, user: str | None = None) -> ExportHeader:
         """Шапка книги: форма, предприятие, период, счётчики, момент выгрузки."""
         return build_export_header(
             mode=self.current_mode,

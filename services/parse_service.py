@@ -13,8 +13,8 @@ class ParseService:
     """Сервис для парсинга файлов разных форматов"""
 
     @classmethod
-    def parse_file(cls, file_path: str, month: str = None, year: int = None,
-                   entity_type: str = None, entity_id: int = None, entity_name: str = None) -> dict:
+    def parse_file(cls, file_path: str, month: str | None = None, year: int | None = None,
+                   entity_type: str | None = None, entity_id: int | None = None, entity_name: str | None = None) -> dict:
         """
         Парсит файл и возвращает структурированные данные.
         

@@ -37,7 +37,9 @@ class MultiLevelHeaderView(QHeaderView):
         """groups = список кортежей (first_col, last_col_inclusive, label)."""
         self._groups = groups or []
         self.updateGeometries()
-        self.viewport().update()
+        viewport = self.viewport()
+        if viewport is not None:
+            viewport.update()
 
     def _find_group(self, col: int) -> tuple[int, int, str] | None:
         for g in self._groups:
@@ -57,7 +59,9 @@ class MultiLevelHeaderView(QHeaderView):
             return QSize(s.width(), s.height() + self._group_height)
         return s
 
-    def paintSection(self, painter: QPainter, rect: QRect, logicalIndex: int):
+    def paintSection(self, painter: QPainter | None, rect: QRect, logicalIndex: int):
+        if painter is None:
+            return
         if not self._groups or rect.isEmpty():
             self._paint_section(painter, rect, logicalIndex)
             return
@@ -104,8 +108,9 @@ class MultiLevelHeaderView(QHeaderView):
             return None
 
         group_rect = QRect(start_pos, top, end_pos - start_pos, self._group_height)
+        viewport = self.viewport()
         visible = group_rect.intersected(
-            QRect(0, top, self.viewport().width(), self._group_height)
+            QRect(0, top, viewport.width() if viewport else 0, self._group_height)
         )
         return visible if not visible.isEmpty() else None
 
@@ -123,8 +128,9 @@ class MultiLevelHeaderView(QHeaderView):
         painter.setPen(palette.color(QPalette.ColorRole.Mid))
         painter.drawRect(rect.adjusted(0, 0, -1, -1))
 
-        text = self.model().headerData(logicalIndex, Qt.Orientation.Horizontal,
-                                       Qt.ItemDataRole.DisplayRole)
+        model = self.model()
+        text = model.headerData(logicalIndex, Qt.Orientation.Horizontal,
+                                Qt.ItemDataRole.DisplayRole) if model else None
         if text:
             painter.setPen(palette.color(QPalette.ColorRole.ButtonText))
             painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, str(text))

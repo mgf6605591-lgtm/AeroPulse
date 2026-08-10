@@ -12,7 +12,7 @@ class SQLAlchemyTableModel(QAbstractTableModel):
     Универсальная модель для отображения списка объектов-строк в QTableView
     """
 
-    def __init__(self, data: list[Any] = None, headers: list[str] = None, parent=None):
+    def __init__(self, data: list[Any] | None = None, headers: list[str] | None = None, parent=None):
         super().__init__(parent)
         self._data = data or []
         self._headers = headers or []
@@ -154,7 +154,7 @@ class SQLAlchemyTableModel(QAbstractTableModel):
             return self._data[row]
         return None
 
-    def refresh(self, new_data: list[Any] = None):
+    def refresh(self, new_data: list[Any] | None = None):
         if new_data is not None:
             self._data = new_data
             self._rebuild_numeric_columns()

@@ -152,6 +152,8 @@ class MultiSelectDialog(QDialog):
             visible = 0
             for i in range(group.childCount()):
                 child = group.child(i)
+                if child is None:
+                    continue
                 shown = (not query) or group_matches or query in child.text(0).casefold()
                 child.setHidden(not shown)
                 visible += shown
@@ -163,9 +165,9 @@ class MultiSelectDialog(QDialog):
             for _, item in self._leaves:
                 item.setHidden(bool(query) and query not in item.text(0).casefold())
 
-        shown = len(self.visible_ids())
+        visible_count = len(self.visible_ids())
         self.counter.setText(
-            f"Показано: {shown} из {self._total}" if query
+            f"Показано: {visible_count} из {self._total}" if query
             else f"Всего показателей: {self._total}"
         )
 

@@ -47,13 +47,19 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install ruff coverage
+          pip install ruff coverage mypy
           # PyQt6 на сборочной машине нужен целиком: без него проверки Qt-слоя
           # не упадут, а молча пропустятся — и CI будет зелёным, ничего не проверив.
           python -c "import PyQt6.QtWidgets"
 
       - name: Линтер
         run: ruff check .
+
+      # Аннотации, которых никто не сверяет, со временем начинают врать — и врут
+      # увереннее, чем их отсутствие: читающий `-> int` не станет проверять на
+      # None. Настройки — в pyproject (INFRA-7).
+      - name: Типы
+        run: mypy
 
       - name: Компиляция
         run: python -m compileall -q . -x '\.venv'
