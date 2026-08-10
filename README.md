@@ -8,7 +8,7 @@
 
 ## Требования
 
-* Python 3.12 или новее (проверяется на 3.12; разработка ведётся и на 3.14)
+* Python 3.12 или новее (CI проверяет 3.12 и 3.14)
 * Windows, macOS или Linux. Собранный дистрибутив рассчитан на Windows; на остальных системах программа запускается из исходников.
 
 ## Установка и запуск
@@ -96,6 +96,7 @@ pyinstaller aeropulse.spec
 ```bash
 python -m unittest discover -s tests -t .
 python -m ruff check .
+python -m mypy
 ```
 
 Тесты слоя Qt идут без экрана — на Windows это работает как есть, на macOS и Linux нужен offscreen:
@@ -104,7 +105,7 @@ python -m ruff check .
 QT_QPA_PLATFORM=offscreen python -m unittest discover -s tests -t .
 ```
 
-Оба прогона выполняются в CI на каждый push и pull request.
+Все три выполняются в CI на каждый push и pull request — на 3.12 и 3.14, вместе с подсчётом покрытия (`coverage run -m unittest discover -s tests -t .`, сейчас 79%).
 
 Новая ревизия схемы:
 
