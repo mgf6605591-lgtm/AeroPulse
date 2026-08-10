@@ -3,6 +3,7 @@ import os
 
 from importers.data_importer import DataImporter
 from db.database import get_session
+from services.import_outcome import ImportOutcome, PeriodRequired, failure, replace
 from services.parse_service import ParseService
 from db.models.entities import Airline, Airport
 
@@ -12,7 +13,8 @@ class ImportService:
 
     @classmethod
     def import_file(cls, file_path: str, entity_type: str = None, entity_id: int = None,
-                    entity_name: str = None, month: str = None, year: int = None) -> dict:
+                    entity_name: str = None, month: str = None,
+                    year: int = None) -> ImportOutcome:
         """
         Парсит файл и импортирует данные в БД.
         
@@ -25,7 +27,7 @@ class ImportService:
             year: год (если не удалось определить из файла)
             
         Returns:
-            dict: результат импорта
+            ImportOutcome: что стало с файлом (ARCH-18)
         """
         # Проверка существования предприятия по ID
         if entity_id:
@@ -36,10 +38,9 @@ class ImportService:
                     entity = session.get(Airport, entity_id)
 
                 if not entity:
-                    return {
-                        'success': False,
-                        'message': f'Предприятие с ID {entity_id} не найдено в базе данных.'
-                    }
+                    return failure(
+                        f'Предприятие с ID {entity_id} не найдено в базе данных.'
+                    )
                 entity_name = entity.name.strip()
         elif entity_name:
             # Поиск по названию (резервный вариант)
@@ -50,10 +51,9 @@ class ImportService:
                     entity = session.query(Airport).filter(Airport.name == entity_name).first()
 
                 if not entity:
-                    return {
-                        'success': False,
-                        'message': f'Предприятие "{entity_name}" не найдено в базе данных.'
-                    }
+                    return failure(
+                        f'Предприятие "{entity_name}" не найдено в базе данных.'
+                    )
                 entity_id = entity.id
         # Предприятие не выбрано — назвать его должен сам файл. Отказ переносится
         # на после разбора: только там видно, есть ли в файле название. Отказывать
@@ -71,58 +71,50 @@ class ImportService:
                 entity_name=entity_name,
             )
         except ValueError as e:
-            return {
-                'success': False,
-                'message': str(e),
-                'source_file': os.path.basename(file_path),
-            }
+            return failure(str(e), source_file=os.path.basename(file_path))
 
         # Форма определяется только по содержимому файла. Прежний откат на entity_type
         # сравнивал выбор пользователя сам с собой, поэтому расхождение не выявлялось
         # никогда — как раз для XLSX, который не возвращал data_type вовсе (DATA-6).
         parsed_type = data.get('data_type')
         if not parsed_type:
-            return {
-                'success': False,
-                'message': 'Не удалось определить форму отчёта по содержимому файла. '
-                           'Импорт отменён, чтобы данные не попали в чужую форму.',
-                'source_file': os.path.basename(file_path),
-            }
+            return failure(
+                'Не удалось определить форму отчёта по содержимому файла. '
+                'Импорт отменён, чтобы данные не попали в чужую форму.',
+                source_file=os.path.basename(file_path),
+            )
         if entity_type == 'airport' and parsed_type == 'airline':
-            return {
-                'success': False,
-                'message': 'Выбран аэропорт, а файл относится к форме 12-ГА (авиакомпании). Для 15-ГА нужен XML с колонками 3–13 и строками 10–90.',
-                'source_file': os.path.basename(file_path),
-            }
+            return failure(
+                'Выбран аэропорт, а файл относится к форме 12-ГА (авиакомпании). '
+                'Для 15-ГА нужен XML с колонками 3–13 и строками 10–90.',
+                source_file=os.path.basename(file_path),
+            )
         if entity_type == 'airline' and parsed_type == 'airport':
-            return {
-                'success': False,
-                'message': 'Выбрана авиакомпания, а файл относится к форме 15-ГА (аэропорты). Выберите тип «Аэропорт».',
-                'source_file': os.path.basename(file_path),
-            }
+            return failure(
+                'Выбрана авиакомпания, а файл относится к форме 15-ГА (аэропорты). '
+                'Выберите тип «Аэропорт».',
+                source_file=os.path.basename(file_path),
+            )
 
         if not entity_id and not cls._names_its_own_entity(data):
-            return {
-                'success': False,
-                'message': 'Предприятие не выбрано, а в файле оно не названо. '
-                           'Выберите предприятие в списке или загрузите бланк, '
-                           'который называет своё предприятие сам.',
-                'source_file': os.path.basename(file_path),
-            }
+            return failure(
+                'Предприятие не выбрано, а в файле оно не названо. '
+                'Выберите предприятие в списке или загрузите бланк, '
+                'который называет своё предприятие сам.',
+                source_file=os.path.basename(file_path),
+            )
 
         # Отчётный период обязателен. Раньше парсер молча подставлял «январь 2025»,
         # и upsert по ключу (показатель, рейс, месяц, год) затирал настоящие январские
         # данные значениями чужого месяца — без резервной копии и следа в журнале (DATA-2).
         if not data.get('month') or not data.get('year'):
-            return {
-                'success': False,
-                'period_required': True,
-                'message': 'Не удалось определить отчётный период файла '
-                           '(лист «Титул», ячейка D13).',
-                'source_file': os.path.basename(file_path),
-                'period_month': data.get('month'),
-                'period_year': data.get('year'),
-            }
+            return PeriodRequired(
+                message='Не удалось определить отчётный период файла '
+                        '(лист «Титул», ячейка D13).',
+                source_file=os.path.basename(file_path),
+                month=data.get('month'),
+                year=data.get('year'),
+            )
 
         # Имя файла кладётся в разобранные данные, а не только в ответ: импортёр
         # записывает его в журнал вместе со счётчиками (FUNC-5).
@@ -132,12 +124,14 @@ class ImportService:
         with get_session() as session:
             result = DataImporter.import_data(session, data)
 
-        if isinstance(result, dict):
-            result["source_file"] = os.path.basename(file_path)
-            result["period_month"] = data.get("month")
-            result["period_year"] = data.get("year")
-            result["sheet_name"] = data.get("sheet_name")
-        return result
+        # Разбор знает содержимое файла, но не его имя, а лист называет только он.
+        return replace(
+            result,
+            source_file=os.path.basename(file_path),
+            month=data.get("month"),
+            year=data.get("year"),
+            sheet_name=data.get("sheet_name"),
+        )
     
     @staticmethod
     def _names_its_own_entity(data: dict) -> bool:

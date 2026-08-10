@@ -28,6 +28,7 @@ from PyQt6.QtCore import QObject, QThread, Qt, pyqtSignal, pyqtSlot
 from PyQt6.QtWidgets import QProgressDialog
 
 from forms.widgets.period_dialog import PeriodDialog
+from services.import_outcome import ImportOutcome, PeriodRequired, failure
 from services.import_service import ImportService
 
 log = logging.getLogger(__name__)
@@ -63,11 +64,7 @@ class ImportWorker(QObject):
             # Исключение, выпущенное наружу, ушло бы в цикл событий рабочего
             # потока: пакет замер бы на этом файле, ничего не сообщив.
             log.exception("Импорт файла не выполнен: %s", request.file_path)
-            result = {
-                "success": False,
-                "message": str(error),
-                "source_file": Path(request.file_path).name,
-            }
+            result = failure(str(error), source_file=Path(request.file_path).name)
         self.done.emit(request, result)
 
 
@@ -139,33 +136,32 @@ class ImportRunner(QObject):
             ImportRequest(file_path, self._entity_type, self._entity_id)
         )
 
-    def _on_file_done(self, request: ImportRequest, result: dict) -> None:
+    def _on_file_done(self, request: ImportRequest, result: ImportOutcome) -> None:
         # Период не прочитался — спрашиваем его у пользователя вместо прежней
         # молчаливой подстановки «январь 2025» (DATA-2). Вопрос задаётся здесь,
         # в потоке интерфейса, пока рабочий поток свободен.
-        if result.get("period_required") and request.file_path not in self._asked:
+        if isinstance(result, PeriodRequired) and request.file_path not in self._asked:
             self._asked.add(request.file_path)
             retry = self._ask_period(request, result)
             if retry is not None:
                 self._request.emit(retry)
                 return
-            result = {
-                "success": False,
-                "message": "Файл пропущен: отчётный период не указан.",
-                "source_file": Path(request.file_path).name,
-            }
+            result = failure(
+                "Файл пропущен: отчётный период не указан.",
+                source_file=Path(request.file_path).name,
+            )
 
         self._results.append(result)
         self._index += 1
         self._progress.setValue(self._index)
         self._send_next()
 
-    def _ask_period(self, request: ImportRequest, result: dict) -> Optional[ImportRequest]:
+    def _ask_period(self, request: ImportRequest, result: PeriodRequired) -> Optional[ImportRequest]:
         """Спрашивает период. None — файл пропускается."""
         dialog = PeriodDialog(
             Path(request.file_path).name,
-            month=result.get("period_month"),
-            year=result.get("period_year"),
+            month=result.month,
+            year=result.year,
             parent=self._progress.parent() or self._progress,
         )
         if dialog.exec() != PeriodDialog.DialogCode.Accepted:

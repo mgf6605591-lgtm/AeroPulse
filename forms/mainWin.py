@@ -228,22 +228,19 @@ class MainWindow(QMainWindow):
         report_lines = []
         any_success = False
         for result in results:
-            base_name = result.get("source_file") or "?"
-            pm = result.get("period_month")
-            py = result.get("period_year")
-            month_label = MONTHS_RU.get(pm, pm) if pm else "?"
-            period = f"{month_label} {py}" if py else str(month_label)
+            base_name = result.source_file or "?"
+            month_label = MONTHS_RU.get(result.month, result.month) if result.month else "?"
+            period = f"{month_label} {result.year}" if result.year else str(month_label)
 
-            if result.get("success"):
+            if result.success:
                 any_success = True
-                sheet = result.get("sheet_name")
-                where = f", лист «{sheet}»" if sheet else ""
+                where = f", лист «{result.sheet_name}»" if result.sheet_name else ""
                 report_lines.append(
-                    f"OK — {base_name} ({period}{where}): {result.get('message', '')}"
+                    f"OK — {base_name} ({period}{where}): {result.message}"
                 )
             else:
                 report_lines.append(
-                    f"Ошибка — {base_name}: {result.get('message', 'Неизвестная ошибка')}"
+                    f"Ошибка — {base_name}: {result.message or 'Неизвестная ошибка'}"
                 )
 
         report = "\n".join(report_lines)

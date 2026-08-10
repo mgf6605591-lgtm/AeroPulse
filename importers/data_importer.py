@@ -9,6 +9,7 @@ from db.models.entities import (
 )
 from db.models.enums import ShippingRegularity, RouteType, Months
 from services import journal_service as journal
+from services.import_outcome import ImportOutcome, failure
 from utils.constants import GA12_DETAIL_TON_PARENT
 from utils.entity_codes import unique_entity_code
 from utils.entity_names import normalized_entity_name
@@ -33,7 +34,7 @@ class DataImporter:
     """Импортер данных в БД с обработкой блокировок"""
 
     @classmethod
-    def _route_import(cls, session, data: dict) -> dict:
+    def _route_import(cls, session, data: dict) -> ImportOutcome:
         """Маршрутизация: сначала явный data_type, иначе по составу payload (без ложного срабатывания на 15-ГА)."""
         dt = data.get("data_type") or data.get("entity_type")
         if dt == "airport":
@@ -44,13 +45,10 @@ class DataImporter:
             return cls._import_airline_data(session, data)
         if "airport" in data or "airports" in data:
             return cls._import_airport_data(session, data)
-        return {
-            "success": False,
-            "message": f"Неизвестный тип данных: {dt}",
-        }
+        return failure(f"Неизвестный тип данных: {dt}")
 
     @classmethod
-    def import_data(cls, session, data: dict) -> dict:
+    def import_data(cls, session, data: dict) -> ImportOutcome:
         """Основной метод импорта данных"""
         try:
             return cls._route_import(session, data)
@@ -61,7 +59,7 @@ class DataImporter:
             raise
     
     @classmethod
-    def _retry_import(cls, data: dict, max_retries: int = 3) -> dict:
+    def _retry_import(cls, data: dict, max_retries: int = 3) -> ImportOutcome:
         """Повторяет импорт при блокировке базы данных"""
         for attempt in range(max_retries):
             try:
@@ -71,16 +69,10 @@ class DataImporter:
             except OperationalError as e:
                 if "database is locked" in str(e) and attempt < max_retries - 1:
                     continue
-                return {
-                    'success': False,
-                    'message': f'Ошибка импорта после {max_retries} попыток: {str(e)}'
-                }
+                return failure(f'Ошибка импорта после {max_retries} попыток: {str(e)}')
             except Exception as e:
-                return {
-                    'success': False,
-                    'message': f'Ошибка при импорте: {str(e)}'
-                }
-        return {'success': False, 'message': 'Не удалось выполнить импорт'}
+                return failure(f'Ошибка при импорте: {str(e)}')
+        return failure('Не удалось выполнить импорт')
 
     @classmethod
     def _link_detail_indicators(cls, session) -> None:
@@ -173,7 +165,7 @@ class DataImporter:
         return indicators_map
 
     @classmethod
-    def _import_airline_data(cls, session, data: dict) -> dict:
+    def _import_airline_data(cls, session, data: dict) -> ImportOutcome:
         """Импорт данных для авиакомпаний"""
         try:
             indicators_map = cls._resolve_indicators(session, data.get('indicators', []))
@@ -274,7 +266,7 @@ class DataImporter:
                 total_imported, total_updated, total_removed,
                 created=created, register='авиакомпаний',
             )
-            if not result.get('success'):
+            if not result.success:
                 # Ни одной строки не прочитано — заводить под неё авиакомпанию не
                 # за что: иначе отказ оставлял бы в справочнике запись из файла,
                 # который в базу не попал.
@@ -288,7 +280,8 @@ class DataImporter:
             return cls._failure(session, e, "авиакомпании")
 
     @classmethod
-    def _resolve_airline(cls, session, data: dict, created: List[str]) -> Tuple[Optional[Airline], Optional[dict]]:
+    def _resolve_airline(cls, session, data: dict,
+                         created: List[str]) -> Tuple[Optional[Airline], Optional[ImportOutcome]]:
         """Авиакомпания отчёта: по id, по названию, иначе заводится.
 
         Название в отчёте — уставное («Акционерное общество "Авиакомпания
@@ -307,19 +300,15 @@ class DataImporter:
         if airline_id:
             airline = session.get(Airline, airline_id)
             if not airline:
-                return None, {
-                    'success': False,
-                    'message': f'Авиакомпания с ID {airline_id} не найдена',
-                }
+                return None, failure(f'Авиакомпания с ID {airline_id} не найдена')
             return airline, None
 
         name = (airline_data.get('name') or '').strip()
         if not name:
-            return None, {
-                'success': False,
-                'message': 'Предприятие не выбрано, а в файле авиакомпания не названа — '
-                           'импорт отменён, чтобы отчётность не ушла в чужую строку.',
-            }
+            return None, failure(
+                'Предприятие не выбрано, а в файле авиакомпания не названа — '
+                'импорт отменён, чтобы отчётность не ушла в чужую строку.'
+            )
 
         airline = cls._airline_by_name(session, name)
         if airline:
@@ -421,7 +410,7 @@ class DataImporter:
         return {row.indicator_id: row for row in rows}
 
     @classmethod
-    def _failure(cls, session, error: Exception, whose: str) -> dict:
+    def _failure(cls, session, error: Exception, whose: str) -> ImportOutcome:
         """Разбор ошибки импорта — общий для обеих веток.
 
         Блокировка базы пробрасывается наверх: там её ждёт `_retry_import` с тремя
@@ -434,15 +423,12 @@ class DataImporter:
         if isinstance(error, OperationalError):
             if "database is locked" in str(error):
                 raise error
-            return {'success': False, 'message': f'Ошибка базы данных: {error}'}
+            return failure(f'Ошибка базы данных: {error}')
 
         if isinstance(error, IntegrityError):
-            return {'success': False, 'message': f'Ошибка целостности данных: {error}'}
+            return failure(f'Ошибка целостности данных: {error}')
 
-        return {
-            'success': False,
-            'message': f'Неожиданная ошибка при импорте данных {whose}: {error}',
-        }
+        return failure(f'Неожиданная ошибка при импорте данных {whose}: {error}')
 
     @staticmethod
     def _airport_blocks(data: dict) -> List[Dict[str, Any]]:
@@ -466,7 +452,7 @@ class DataImporter:
         }]
 
     @classmethod
-    def _import_airport_data(cls, session, data: dict) -> dict:
+    def _import_airport_data(cls, session, data: dict) -> ImportOutcome:
         """Импорт данных для аэропортов (одного или всех аэропортов предприятия)."""
         try:
             month_enum, year, period_error = cls._resolve_period(data)
@@ -518,7 +504,7 @@ class DataImporter:
             result = cls._import_result(
                 total_imported, total_updated, total_removed, created=created
             )
-            if not result.get('success'):
+            if not result.success:
                 # Ни одной строки не прочитано — заводить под неё аэропорты не за
                 # что: иначе отказ оставлял бы в справочнике записи из файла,
                 # который в базу не попал.
@@ -532,7 +518,8 @@ class DataImporter:
             return cls._failure(session, e, "аэропорта")
 
     @classmethod
-    def _resolve_airport(cls, session, block: dict, created: List[str]) -> Tuple[Optional[Airport], Optional[dict]]:
+    def _resolve_airport(cls, session, block: dict,
+                         created: List[str]) -> Tuple[Optional[Airport], Optional[ImportOutcome]]:
         """Аэропорт блока: по id, по названию, иначе заводится.
 
         Сводный бланк называет тридцать с лишним аэропортов, и требовать, чтобы
@@ -544,19 +531,15 @@ class DataImporter:
         if airport_id:
             airport = session.get(Airport, airport_id)
             if not airport:
-                return None, {
-                    'success': False,
-                    'message': f'Аэропорт с ID {airport_id} не найден',
-                }
+                return None, failure(f'Аэропорт с ID {airport_id} не найден')
             return airport, None
 
         name = (block.get('name') or '').strip()
         if not name:
-            return None, {
-                'success': False,
-                'message': 'В файле есть блок без названия аэропорта — импорт отменён, '
-                           'чтобы отчётность не ушла в чужую строку.',
-            }
+            return None, failure(
+                'В файле есть блок без названия аэропорта — импорт отменён, '
+                'чтобы отчётность не ушла в чужую строку.'
+            )
 
         airport = session.query(Airport).filter(Airport.name == name).first()
         if airport:
@@ -672,20 +655,17 @@ class DataImporter:
         year = data.get('year')
         month_enum = next((m for m in Months if m.name == month_name), None)
         if month_enum is None or not year:
-            return None, None, {
-                'success': False,
-                'message': (
-                    f'Отчётный период не определён (месяц: {month_name!r}, '
-                    f'год: {year!r}). Импорт отменён, чтобы не затереть данные '
-                    'другого периода.'
-                ),
-            }
+            return None, None, failure(
+                f'Отчётный период не определён (месяц: {month_name!r}, '
+                f'год: {year!r}). Импорт отменён, чтобы не затереть данные '
+                'другого периода.'
+            )
         return month_enum, int(year), None
 
     @staticmethod
     def _import_result(total_imported: int, total_updated: int, total_removed: int = 0,
                        created: Optional[List[str]] = None,
-                       register: str = 'аэропортов') -> dict:
+                       register: str = 'аэропортов') -> ImportOutcome:
         """Итог импорта. Ноль записей — отказ, а не успех.
 
         Разбор, не нашедший ни одного показателя, возвращал success=True с
@@ -694,13 +674,7 @@ class DataImporter:
         обнаружиться это могло разве что при сверке итогов (DATA-4).
         """
         if total_imported == 0 and total_updated == 0:
-            return {
-                'success': False,
-                'message': 'Ни одного показателя не прочитано — в базу не записано ничего.',
-                'imported': 0,
-                'updated': 0,
-                'removed': 0,
-            }
+            return failure('Ни одного показателя не прочитано — в базу не записано ничего.')
         message = f'Импорт завершен. Добавлено: {total_imported}, Обновлено: {total_updated}'
         if total_removed:
             # Про удаление сообщается прямо: отчёт заменил период целиком, и
@@ -712,11 +686,11 @@ class DataImporter:
             # Пополнение справочника называется поимённо: импорт заводит записи
             # сам, и узнавать об этом из справочника задним числом неправильно.
             message += f'. Заведены в справочнике {register}: ' + ', '.join(created)
-        return {
-            'success': True,
-            'message': message,
-            'imported': total_imported,
-            'updated': total_updated,
-            'removed': total_removed,
-            'created_entities': list(created or ()),
-        }
+        return ImportOutcome(
+            success=True,
+            message=message,
+            imported=total_imported,
+            updated=total_updated,
+            removed=total_removed,
+            created_entities=tuple(created or ()),
+        )
