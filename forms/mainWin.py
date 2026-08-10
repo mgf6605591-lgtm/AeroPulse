@@ -18,9 +18,8 @@ from PyQt6.QtWidgets import (
     QPushButton, QFileDialog, QMessageBox
 )
 from db.backup import make_backup
-from db.database import db_path, get_session
-from db.models.entities import AirlineIndicators, AirportIndicators
-from services import journal_service as journal
+from db.database import db_path
+from services.deletion_service import delete_indicators
 from services.import_service import ImportService
 from controllers.filter_controller import FilterController
 from forms.widgets.filter_widget import FilterWidget
@@ -143,6 +142,14 @@ class MainWindow(QMainWindow):
         else:
             self._reload_airport_tab()
 
+    def _entity_type(self) -> str:
+        """Вид отчётности открытой вкладки — так, как его называют службы.
+
+        Номер режима — внутреннее дело окна; за его пределами предприятие
+        описывается словом, и перевод должен быть в одном месте.
+        """
+        return 'airline' if self.current_mode == MODE_AIRLINE else 'airport'
+
     def _reload_airline_tab(self):
         filters = self.filter_controller.get_current_filters(self.filter_widget_airline)
         self.table_widget_airline.load_data(MODE_AIRLINE, filters)
@@ -171,7 +178,7 @@ class MainWindow(QMainWindow):
         # Тип предприятия — по вкладке, с которой позвали импорт. Диалог всегда
         # открывался на «Авиакомпании», и с вкладки аэропортов пользователь
         # получал не тот список (FUNC-12).
-        opened_for = 'airline' if self.current_mode == MODE_AIRLINE else 'airport'
+        opened_for = self._entity_type()
         dialog = ImportDialog(self)
         dialog.type_changed.connect(
             lambda entity_type: self.refresh_entities(entity_type, dialog.entity_combo)
@@ -305,7 +312,7 @@ class MainWindow(QMainWindow):
         )
 
     def delete_records(self, ids_to_delete: list):
-        """Удаление записей"""
+        """Удаление записей: вопрос и итог. Копию, удаление и журнал ведёт служба (ARCH-16)."""
         count = len(ids_to_delete)
         reply = QMessageBox.question(
             self, "Подтверждение удаления",
@@ -316,45 +323,22 @@ class MainWindow(QMainWindow):
         if reply != QMessageBox.StandardButton.Yes:
             return
 
-        # Копия базы снимается до удаления: отменить его нечем, а отчётность
-        # восстанавливается только повторной загрузкой файлов (FUNC-6).
-        backup_path = None
         try:
-            backup_path = make_backup(db_path(), reason="delete")
-        except Exception:
-            log.exception("Не удалось снять копию базы")
-
-        deleted = 0
-        try:
-            with get_session() as session:
-                if self.current_mode == MODE_AIRLINE:
-                    for rec_id in ids_to_delete:
-                        rec = session.get(AirlineIndicators, rec_id)
-                        if rec:
-                            session.delete(rec)
-                            deleted += 1
-                else:
-                    for rec_id in ids_to_delete:
-                        rec = session.get(AirportIndicators, rec_id)
-                        if rec:
-                            session.delete(rec)
-                            deleted += 1
-                session.commit()
-
-            journal.record_deletion(
-                count=deleted,
-                entity_type='airline' if self.current_mode == MODE_AIRLINE else 'airport',
-                message=f"копия базы: {backup_path.name}" if backup_path else "копия базы не снята",
+            result = delete_indicators(
+                self._entity_type(),
+                ids_to_delete,
                 user=getattr(self.current_user, "username", None),
             )
-
-            note = f"\nКопия базы: {backup_path.name}" if backup_path else ""
-            QMessageBox.information(self, "Готово", f"Удалено записей: {deleted}{note}")
-            self._load_initial_data()
-
         except Exception as e:
             log.exception("Не удалось удалить записи")
             QMessageBox.critical(self, "Ошибка", f"Ошибка удаления: {e}")
+            return
+
+        note = f"\nКопия базы: {result.backup.name}" if result.backup else ""
+        QMessageBox.information(self, "Готово", f"Удалено записей: {result.deleted}{note}")
+        # Перечитывание за пределами `try`: удаление уже состоялось, и назвать
+        # его неудачей из-за сбоя перерисовки значило бы соврать.
+        self._load_initial_data()
 
     def logout_action(self):
         """Выход из системы: вернуться к окну входа, не закрывая программу."""
