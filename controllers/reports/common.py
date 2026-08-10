@@ -5,7 +5,6 @@
 из соседнего модуля, обещает обратное.
 """
 from decimal import Decimal
-from typing import List, Optional, Set
 
 from controllers.report_filters import ReportFilters
 from utils.constants import MONTHS_LIST, MONTHS_RU
@@ -14,7 +13,7 @@ from utils.constants import MONTHS_LIST, MONTHS_RU
 EMPTY_PERIOD: tuple = (None, None)
 
 
-def sorted_periods(periods: Set[tuple]) -> List[tuple]:
+def sorted_periods(periods: set[tuple]) -> list[tuple]:
     """Периоды в хронологическом порядке: сначала по году, затем по месяцу."""
     def order(period: tuple) -> tuple:
         year, month = period
@@ -39,7 +38,7 @@ def period_label(period: tuple) -> str:
     return f"{name} {year}" if year is not None else name
 
 
-def period_count(periods: List[tuple]) -> int:
+def period_count(periods: list[tuple]) -> int:
     """Сколько периодов реально попало в свод.
 
     Заглушка пустой выборки не считается. Проверять её через истинность нельзя:
@@ -49,7 +48,7 @@ def period_count(periods: List[tuple]) -> int:
     return 0 if list(periods) == [EMPTY_PERIOD] else len(periods)
 
 
-def period_label_ru(filters: Optional[ReportFilters]) -> str:
+def period_label_ru(filters: ReportFilters | None) -> str:
     if not filters:
         return "выбранный период"
     period = filters.period

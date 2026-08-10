@@ -13,7 +13,7 @@
 `controllers.data_controller` звал его, а он звал `controllers.AirlineIndController`,
 — и уровни из этих двух пакетов не строились (ARCH-14).
 """
-from typing import Any, List
+from typing import Any
 
 from controllers.AirlineIndController import AirlineIndController
 from controllers.detail_rows import DetailRow, from_airline_indicator
@@ -24,13 +24,13 @@ from db.database import get_session
 class AirlineIndicatorService:
 
     @classmethod
-    def aggregate(cls, filters: ReportFilters) -> List[Any]:
+    def aggregate(cls, filters: ReportFilters) -> list[Any]:
         """Ячейки свода: суммы по группам вместо самих фактов (PERF-2)."""
         with get_session() as session:
             return AirlineIndController.aggregate(session, filters or NO_FILTERS)
 
     @classmethod
-    def detail_rows(cls, filters: ReportFilters) -> List[DetailRow]:
+    def detail_rows(cls, filters: ReportFilters) -> list[DetailRow]:
         """Строки подробной таблицы — снимками, а не записями ORM (BUG-14)."""
         with get_session() as session:
             if filters:

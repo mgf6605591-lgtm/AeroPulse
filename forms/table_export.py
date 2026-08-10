@@ -11,7 +11,7 @@
 приходят готовые заголовки и строки значений.
 """
 import logging
-from typing import Any, List, Optional, Tuple
+from typing import Any
 
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QMessageBox, QTableView
@@ -37,7 +37,7 @@ def cell_value(model, index) -> Any:
     return value
 
 
-def read_table(table_view: QTableView) -> Tuple[List[str], List[List[Any]]]:
+def read_table(table_view: QTableView) -> tuple[list[str], list[list[Any]]]:
     """Снимает с таблицы заголовки и значения — всё, что нужно книге."""
     model = table_view.model()
     if model is None:
@@ -61,8 +61,8 @@ def export_table_to_excel(
     table_view: QTableView,
     file_path: str,
     parent=None,
-    header_groups: Optional[List[Tuple[int, int, str]]] = None,
-    header: Optional[ExportHeader] = None,
+    header_groups: list[tuple[int, int, str]] | None = None,
+    header: ExportHeader | None = None,
 ) -> bool:
     """Выгружает таблицу и сообщает пользователю, чем дело кончилось."""
     headers, rows = read_table(table_view)

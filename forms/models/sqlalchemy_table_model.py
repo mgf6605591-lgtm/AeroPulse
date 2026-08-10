@@ -1,5 +1,5 @@
 # forms/models/sqlalchemy_table_model.py
-from typing import List, Any, Optional
+from typing import Any
 from PyQt6.QtCore import QAbstractTableModel, Qt, QModelIndex
 from decimal import Decimal
 
@@ -12,14 +12,14 @@ class SQLAlchemyTableModel(QAbstractTableModel):
     Универсальная модель для отображения списка объектов-строк в QTableView
     """
 
-    def __init__(self, data: List[Any] = None, headers: List[str] = None, parent=None):
+    def __init__(self, data: list[Any] = None, headers: list[str] = None, parent=None):
         super().__init__(parent)
         self._data = data or []
         self._headers = headers or []
-        self._attr_paths: List[List[str]] = []
+        self._attr_paths: list[list[str]] = []
         self._numeric_columns: set[int] = set()
 
-    def set_source_data(self, data: List[Any]):
+    def set_source_data(self, data: list[Any]):
         """Установка данных модели.
 
         Метод назывался `setData` и перекрывал `QAbstractItemModel.setData(index,
@@ -32,11 +32,11 @@ class SQLAlchemyTableModel(QAbstractTableModel):
         self._rebuild_numeric_columns()
         self.endResetModel()
 
-    def setHeaders(self, headers: List[str]):
+    def setHeaders(self, headers: list[str]):
         """Установка заголовков колонок"""
         self._headers = headers
 
-    def setColumnAttributes(self, attrs: List[str]):
+    def setColumnAttributes(self, attrs: list[str]):
         """
         Установка соответствия колонок атрибутам моделей
         Например: ['id', 'name', 'value']
@@ -121,7 +121,7 @@ class SQLAlchemyTableModel(QAbstractTableModel):
                     self._numeric_columns.add(col)
                 break
 
-    def _get_attribute(self, obj: Any, path: List[str]) -> Any:
+    def _get_attribute(self, obj: Any, path: list[str]) -> Any:
         """Значение по заранее разобранному пути (поддержка вложенных отношений)"""
         try:
             value = obj
@@ -149,12 +149,12 @@ class SQLAlchemyTableModel(QAbstractTableModel):
             return Qt.ItemFlag.NoItemFlags
         return Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
 
-    def get_object_by_row(self, row: int) -> Optional[Any]:
+    def get_object_by_row(self, row: int) -> Any | None:
         if 0 <= row < len(self._data):
             return self._data[row]
         return None
 
-    def refresh(self, new_data: List[Any] = None):
+    def refresh(self, new_data: list[Any] = None):
         if new_data is not None:
             self._data = new_data
             self._rebuild_numeric_columns()

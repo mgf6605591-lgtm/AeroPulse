@@ -20,7 +20,8 @@ Revises: b7a4c9f21e05
 Create Date: 2026-08-07 14:02:18.551204
 
 """
-from typing import Sequence, Union
+from typing import Union
+from collections.abc import Sequence
 
 from alembic import op
 import sqlalchemy as sa
@@ -28,9 +29,9 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = 'c8f1b4d27a63'
-down_revision: Union[str, Sequence[str], None] = 'b7a4c9f21e05'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | Sequence[str] | None = 'b7a4c9f21e05'
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 VALUE_TABLES = ('airlineInd', 'airportInd')
 

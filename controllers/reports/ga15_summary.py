@@ -6,7 +6,8 @@
 """
 from collections import defaultdict
 from decimal import Decimal
-from typing import Any, Dict, List, Optional, Sequence, Set
+from typing import Any
+from collections.abc import Sequence
 
 from controllers.airport_ind_service import AirportIndicatorService
 from controllers.report_filters import NO_FILTERS, ReportFilters
@@ -28,8 +29,8 @@ from utils.ga15_summary_layout import (
 
 
 def _summary_months(
-    filters: Optional[ReportFilters], with_data: Set[tuple]
-) -> List[tuple]:
+    filters: ReportFilters | None, with_data: set[tuple]
+) -> list[tuple]:
     """Месяцы колонок сводки: весь выбранный период, а не только месяцы с цифрами.
 
     Месяц без отчётности — это ноль, а не отсутствующая колонка. Иначе вместе с
@@ -44,7 +45,7 @@ def _summary_months(
         return sorted(with_data)
 
     (year_from, month_from), (year_to, month_to) = period
-    out: List[tuple] = []
+    out: list[tuple] = []
     year, month = year_from, month_from
     while (year, month) <= (year_to, month_to):
         out.append((year, month))
@@ -54,7 +55,7 @@ def _summary_months(
     return out
 
 
-def _tags_by_code() -> Dict[str, str]:
+def _tags_by_code() -> dict[str, str]:
     """Код показателя строки 08 бланка → метка его графы."""
     return {
         code: tag
@@ -64,10 +65,10 @@ def _tags_by_code() -> Dict[str, str]:
 
 
 def _merge_month_buckets(
-    data: Dict[int, Dict[tuple, Dict[str, Decimal]]], airport_ids: Sequence[int]
-) -> Dict[tuple, Dict[str, Decimal]]:
+    data: dict[int, dict[tuple, dict[str, Decimal]]], airport_ids: Sequence[int]
+) -> dict[tuple, dict[str, Decimal]]:
     """Складывает отчётность нескольких аэропортов в один набор «месяц → графа»."""
-    merged: Dict[tuple, Dict[str, Decimal]] = defaultdict(
+    merged: dict[tuple, dict[str, Decimal]] = defaultdict(
         lambda: defaultdict(lambda: Decimal("0"))
     )
     for airport_id in airport_ids:
@@ -81,12 +82,12 @@ def _summary_row(
     title: str,
     airport_ids: Sequence[int],
     blocks: Sequence[Ga15PeriodBlock],
-    data: Dict[int, Dict[tuple, Dict[str, Decimal]]],
-    selected: Optional[Set[str]],
-) -> Dict[str, Any]:
+    data: dict[int, dict[tuple, dict[str, Decimal]]],
+    selected: set[str] | None,
+) -> dict[str, Any]:
     """Строка сводки: аэропорт (или сумма нескольких) по всем колонкам-периодам."""
     buckets = _merge_month_buckets(data, airport_ids)
-    row: Dict[str, Any] = {GA15_SUMMARY_ENTITY_KEY: title}
+    row: dict[str, Any] = {GA15_SUMMARY_ENTITY_KEY: title}
 
     for block in blocks:
         for tag in GA15_METRIC_TAGS:
@@ -105,10 +106,10 @@ def _summary_row(
 
 
 def _rows(
-    shown: List[tuple],
+    shown: list[tuple],
     blocks: Sequence[Ga15PeriodBlock],
-    data: Dict[int, Dict[tuple, Dict[str, Decimal]]],
-    selected: Optional[Set[str]],
+    data: dict[int, dict[tuple, dict[str, Decimal]]],
+    selected: set[str] | None,
 ) -> tuple:
     """Строки сводки в порядке листа: предприятие, его аэропорты, затем «Итого».
 
@@ -117,15 +118,15 @@ def _rows(
     давал бы сводку с нулевым итогом.
     """
     shown_ids = {entry[0] for entry in shown}
-    children: Dict[int, List[tuple]] = defaultdict(list)
-    top: List[tuple] = []
+    children: dict[int, list[tuple]] = defaultdict(list)
+    top: list[tuple] = []
     for airport_id, name, parent_id, _ in shown:
         if parent_id is not None and parent_id in shown_ids:
             children[parent_id].append((airport_id, name))
         else:
             top.append((airport_id, name))
 
-    pivot_rows: List[Dict[str, Any]] = []
+    pivot_rows: list[dict[str, Any]] = []
     for airport_id, name in top:
         pivot_rows.append(
             _summary_row(name, [airport_id], blocks, data, selected)
@@ -154,7 +155,7 @@ def _rows(
     return pivot_rows, len(shown), enterprises
 
 
-def _empty(headers, keys, groups, message: str) -> Dict[str, Any]:
+def _empty(headers, keys, groups, message: str) -> dict[str, Any]:
     """Сводка без единого аэропорта: причина называется прямо, а не пустым листом."""
     return {
         "rows": [{GA15_SUMMARY_ENTITY_KEY: message}],
@@ -172,7 +173,7 @@ def _empty(headers, keys, groups, message: str) -> Dict[str, Any]:
     }
 
 
-def build(filters: ReportFilters) -> Dict[str, Any]:
+def build(filters: ReportFilters) -> dict[str, Any]:
     """Свод по всем аэропортам — как лист «15-ГА» годовой сводки.
 
     Строка на аэропорт, разбивка предприятия под его строкой, «Итого» —
@@ -185,10 +186,10 @@ def build(filters: ReportFilters) -> Dict[str, Any]:
 
     tag_by_code = _tags_by_code()
     # airport_id → (год, месяц) → метка графы → сумма
-    data: Dict[int, Dict[tuple, Dict[str, Decimal]]] = defaultdict(
+    data: dict[int, dict[tuple, dict[str, Decimal]]] = defaultdict(
         lambda: defaultdict(lambda: defaultdict(lambda: Decimal("0")))
     )
-    months_with_data: Set[tuple] = set()
+    months_with_data: set[tuple] = set()
     n_records = 0
 
     for row in rows:

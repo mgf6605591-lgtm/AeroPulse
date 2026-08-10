@@ -14,7 +14,7 @@
 """
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 from controllers.report_filters import NO_FILTERS
 from utils.constants import MODE_AIRLINE, MONTHS_LIST, MONTHS_RU, VIEW_DETAIL
@@ -28,7 +28,7 @@ class ExportHeader:
     """Название листа и строки шапки — пары «подпись, значение»."""
 
     sheet_title: str
-    lines: List[Tuple[str, str]] = field(default_factory=list)
+    lines: list[tuple[str, str]] = field(default_factory=list)
 
     def __len__(self) -> int:
         return len(self.lines)
@@ -38,7 +38,7 @@ def form_name(mode: int) -> str:
     return "12-ГА" if mode == MODE_AIRLINE else "15-ГА"
 
 
-def month_label(number: Optional[int]) -> str:
+def month_label(number: int | None) -> str:
     """Название месяца по его номеру 1…12."""
     if not number or not 1 <= number <= len(MONTHS_LIST):
         return ""
@@ -61,7 +61,7 @@ def period_label(filters) -> str:
     return first if first == last else f"{first} — {last}"
 
 
-def entity_label(mode: int, stats: Dict[str, Any]) -> str:
+def entity_label(mode: int, stats: dict[str, Any]) -> str:
     """Предприятие или пометка о своде, если их несколько."""
     name = (stats.get("airline_name") or stats.get("airport_name") or "").strip()
     if name:
@@ -74,9 +74,9 @@ def build_export_header(
     mode: int,
     view: str,
     filters=None,
-    stats: Optional[Dict[str, Any]] = None,
-    user: Optional[str] = None,
-    now: Optional[datetime] = None,
+    stats: dict[str, Any] | None = None,
+    user: str | None = None,
+    now: datetime | None = None,
 ) -> ExportHeader:
     """Собирает шапку. Пустые значения в неё не попадают.
 
@@ -90,7 +90,7 @@ def build_export_header(
     form = form_name(mode)
     view_name = "подробная таблица" if view == VIEW_DETAIL else "свод"
 
-    lines: List[Tuple[str, str]] = [
+    lines: list[tuple[str, str]] = [
         ("Форма", form),
         ("Предприятие", entity_label(mode, stats)),
     ]

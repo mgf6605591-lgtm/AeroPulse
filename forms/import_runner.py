@@ -22,7 +22,6 @@
 import logging
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Optional
 
 from PyQt6.QtCore import QObject, QThread, Qt, pyqtSignal, pyqtSlot
 from PyQt6.QtWidgets import QProgressDialog
@@ -41,8 +40,8 @@ class ImportRequest:
     file_path: str
     entity_type: str
     entity_id: int
-    month: Optional[str] = None
-    year: Optional[int] = None
+    month: str | None = None
+    year: int | None = None
 
 
 class ImportWorker(QObject):
@@ -156,7 +155,7 @@ class ImportRunner(QObject):
         self._progress.setValue(self._index)
         self._send_next()
 
-    def _ask_period(self, request: ImportRequest, result: PeriodRequired) -> Optional[ImportRequest]:
+    def _ask_period(self, request: ImportRequest, result: PeriodRequired) -> ImportRequest | None:
         """Спрашивает период. None — файл пропускается."""
         dialog = PeriodDialog(
             Path(request.file_path).name,

@@ -10,7 +10,6 @@
 хранится в базе. Так список не может разойтись со схемой: он и есть схема.
 """
 import re
-from typing import Optional, Tuple
 
 from db.models.enums import Months
 
@@ -23,14 +22,14 @@ MONTH_NAMES = tuple(month.name for month in Months)
 _FILENAME_PERIOD = re.compile(r"_((?:19|20)\d{2})_(\d{1,2})(?=[._]|$)")
 
 
-def month_name(number: int) -> Optional[str]:
+def month_name(number: int) -> str | None:
     """Название месяца по номеру 1…12 или None, если номер вне диапазона."""
     if not isinstance(number, int) or not 1 <= number <= len(MONTH_NAMES):
         return None
     return MONTH_NAMES[number - 1]
 
 
-def month_from_period(period: str) -> Optional[str]:
+def month_from_period(period: str) -> str | None:
     """Месяц из атрибута `period` в корне XML: последние две цифры — номер 1…12.
 
     Ведущий ноль в выгрузках не пишется: январь — это `period="1"`, а не «01».
@@ -44,7 +43,7 @@ def month_from_period(period: str) -> Optional[str]:
     return month_name(int(digits[-2:]))
 
 
-def period_from_meta_filename(path: str) -> Tuple[Optional[str], Optional[int]]:
+def period_from_meta_filename(path: str) -> tuple[str | None, int | None]:
     """Резерв: месяц и год из имени файла — его последние два числа.
 
     Выгрузка называет файл `КОД_ФОРМА_ПЕРИОД_ПРЕДПРИЯТИЕ_ГОД_МЕСЯЦ.xml`, и год с

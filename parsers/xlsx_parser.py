@@ -2,7 +2,6 @@
 import re
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import Dict, List, Optional, Tuple
 
 import pandas as pd
 from parsers.base_parser import BaseParser
@@ -35,7 +34,7 @@ OKEI_COL = 3
 
 # Вид сообщения → графы бланка. Международные хранятся суммой граф 4 и 5;
 # графа 9 «ИТОГО» производная и не грузится, иначе она удвоила бы отчёт.
-GA12_ROUTE_COLUMNS: Tuple[Tuple[str, Tuple[int, ...]], ...] = (
+GA12_ROUTE_COLUMNS: tuple[tuple[str, tuple[int, ...]], ...] = (
     ('trunk', (4, 5)),
     ('local', (6,)),
     ('interregional', (7,)),
@@ -47,7 +46,7 @@ class XLSXParser(BaseParser):
 
     @classmethod
     def parse_file(cls, file_name: str, month: str = None, year: int = None,
-                   entity_type: str = None, entity_id: int = None, entity_name: str = None) -> Dict:
+                   entity_type: str = None, entity_id: int = None, entity_name: str = None) -> dict:
         """
         Парсинг файла формы ГА12.
         
@@ -116,7 +115,7 @@ class XLSXParser(BaseParser):
         return result
 
     @classmethod
-    def _find_title_sheet_name(cls, xl: pd.ExcelFile) -> Optional[str]:
+    def _find_title_sheet_name(cls, xl: pd.ExcelFile) -> str | None:
         for name in xl.sheet_names:
             n = str(name).strip().lower().replace("ё", "е")
             if n == "титул" or n.startswith("титул"):
@@ -127,7 +126,7 @@ class XLSXParser(BaseParser):
         return None
 
     @classmethod
-    def _month_year_from_title_sheet(cls, file_name: str) -> Tuple[Optional[str], Optional[int]]:
+    def _month_year_from_title_sheet(cls, file_name: str) -> tuple[str | None, int | None]:
         """Лист «Титул», ячейка D13 (строка 13, столбец D) — месяц и при наличии год."""
         try:
             with pd.ExcelFile(file_name) as xl:
@@ -143,7 +142,7 @@ class XLSXParser(BaseParser):
             return None, None
 
     @classmethod
-    def _parse_month_year_value(cls, raw) -> Tuple[Optional[str], Optional[int]]:
+    def _parse_month_year_value(cls, raw) -> tuple[str | None, int | None]:
         """Преобразует значение D13 в (Months.name, год)."""
         if raw is None:
             return None, None
@@ -211,7 +210,7 @@ class XLSXParser(BaseParser):
         return None, year
 
     @staticmethod
-    def _month_num_to_name(num: int) -> Optional[str]:
+    def _month_num_to_name(num: int) -> str | None:
         if 1 <= num <= 12:
             return month_name(num)
         return None
@@ -226,7 +225,7 @@ class XLSXParser(BaseParser):
         return count_markers(df, GA12_SHEET_MARKERS) >= GA12_SHEET_MARKERS_REQUIRED
 
     @classmethod
-    def _read_ga12_sheet(cls, file_name: str) -> Tuple[pd.DataFrame, str]:
+    def _read_ga12_sheet(cls, file_name: str) -> tuple[pd.DataFrame, str]:
         """Находит лист формы 12-ГА и возвращает его вместе с именем."""
         df, name = find_sheet(file_name, cls._looks_like_ga12, cls._name_hints_ga12)
         if df is None:
@@ -242,7 +241,7 @@ class XLSXParser(BaseParser):
         return "ГА12" in n or "12ГА" in n
 
     @classmethod
-    def _get_indicators_from_df(cls, df: pd.DataFrame) -> List[Dict]:
+    def _get_indicators_from_df(cls, df: pd.DataFrame) -> list[dict]:
         """Показатели листа 12-ГА: строка бланка опознаётся по своему номеру.
 
         Раньше строки адресовались жёсткими индексами листа. На настоящем бланке
@@ -256,7 +255,7 @@ class XLSXParser(BaseParser):
         тоннокилометража номера не имеют и опознаются маркером «а)», «б)», «в)»
         под своей родительской строкой.
         """
-        indicators: List[Dict] = []
+        indicators: list[dict] = []
 
         for row_idx in range(df.shape[0]):
             row = cls._blank_row_at(df, row_idx)
@@ -276,7 +275,7 @@ class XLSXParser(BaseParser):
         return indicators
 
     @classmethod
-    def _blank_row_at(cls, df: pd.DataFrame, row_idx: int) -> Optional[Ga12Row]:
+    def _blank_row_at(cls, df: pd.DataFrame, row_idx: int) -> Ga12Row | None:
         """Строка бланка, описанная в этой строке листа, либо None."""
         title = df.iloc[row_idx, TITLE_COL] if df.shape[1] > TITLE_COL else None
         if not cls._is_data_title(title):
@@ -294,7 +293,7 @@ class XLSXParser(BaseParser):
         return cls._detail_row_at(df, row_idx, title)
 
     @classmethod
-    def _detail_row_at(cls, df: pd.DataFrame, row_idx: int, title) -> Optional[Ga12Row]:
+    def _detail_row_at(cls, df: pd.DataFrame, row_idx: int, title) -> Ga12Row | None:
         marker = str(title).strip()[:2]
         row = GA12_DETAIL_ROW_BY_MARKER.get(marker)
         if row is None:
@@ -324,14 +323,14 @@ class XLSXParser(BaseParser):
             )
 
     @classmethod
-    def _values_at(cls, df: pd.DataFrame, row_idx: int) -> List[Tuple[str, Decimal]]:
+    def _values_at(cls, df: pd.DataFrame, row_idx: int) -> list[tuple[str, Decimal]]:
         """Значения строки по видам сообщения.
 
         Графы бланка: 4 и 5 — международные (в базу идёт их сумма), 6 — внутренние
         всего, 7 — из них местные, 8 — из них субсидируемые. Графа 9 «ИТОГО
         гр.4+гр.5+гр.6» — производная, в базу не грузится.
         """
-        out: List[Tuple[str, Decimal]] = []
+        out: list[tuple[str, Decimal]] = []
         for route_type, cols in GA12_ROUTE_COLUMNS:
             total = Decimal('0')
             found = False
@@ -362,7 +361,7 @@ class XLSXParser(BaseParser):
         return not text.replace(',', '.').replace('.', '').isdigit()
 
     @staticmethod
-    def _blank_number(raw) -> Optional[int]:
+    def _blank_number(raw) -> int | None:
         """№ строки из графы 2 бланка (1…20), иначе None."""
         if raw is None or (isinstance(raw, float) and pd.isna(raw)) or isinstance(raw, bool):
             return None
@@ -373,7 +372,7 @@ class XLSXParser(BaseParser):
         return number
 
     @classmethod
-    def _safe_decimal(cls, val) -> Optional[Decimal]:
+    def _safe_decimal(cls, val) -> Decimal | None:
         """Безопасное преобразование значения в Decimal."""
         if val is None or (isinstance(val, float) and pd.isna(val)):
             return None

@@ -9,7 +9,6 @@
 не теряется — уходит в файловый журнал приложения.
 """
 import logging
-from typing import Optional
 
 from db.database import get_session
 from db.models.entities import ImportLog
@@ -21,11 +20,11 @@ KIND_DELETE = "delete"
 KIND_REPLACE = "replace"
 
 
-def record(session, *, kind: str, source_file: Optional[str] = None,
-           entity_type: Optional[str] = None, entity_id: Optional[int] = None,
-           entity_name: Optional[str] = None, month=None, year: Optional[int] = None,
+def record(session, *, kind: str, source_file: str | None = None,
+           entity_type: str | None = None, entity_id: int | None = None,
+           entity_name: str | None = None, month=None, year: int | None = None,
            imported: int = 0, updated: int = 0, removed: int = 0,
-           message: Optional[str] = None, user: Optional[str] = None) -> None:
+           message: str | None = None, user: str | None = None) -> None:
     """Добавляет строку журнала в открытую сессию (без commit)."""
     session.add(ImportLog(
         kind=kind,
@@ -51,8 +50,8 @@ def record_safely(session, **fields) -> None:
         log.exception("Не удалось записать строку журнала")
 
 
-def record_deletion(*, count: int, entity_type: Optional[str] = None,
-                    message: Optional[str] = None, user: Optional[str] = None) -> None:
+def record_deletion(*, count: int, entity_type: str | None = None,
+                    message: str | None = None, user: str | None = None) -> None:
     """Отдельная запись об удалении — в своей сессии, после самого удаления."""
     try:
         with get_session() as session:
@@ -63,7 +62,7 @@ def record_deletion(*, count: int, entity_type: Optional[str] = None,
         log.exception("Не удалось записать удаление в журнал")
 
 
-def _file_name(path: Optional[str]) -> Optional[str]:
+def _file_name(path: str | None) -> str | None:
     """В журнал идёт имя файла, а не полный путь: путь к чужому каталогу ничего
     не добавляет к прослеживаемости, зато попадает в базу вместе с ним."""
     if not path:

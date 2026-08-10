@@ -14,7 +14,6 @@
 """
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Optional
 
 from db.models.enums import Months, RouteType, ShippingRegularity
 
@@ -33,14 +32,14 @@ class DetailRow:
     entity_code: str
     indicator: str
     measure: str
-    month: Optional[Months]
-    year: Optional[int]
-    value: Optional[Decimal]
+    month: Months | None
+    year: int | None
+    value: Decimal | None
     # Только для 12-ГА: рейс описывается парой «вид маршрута + регулярность».
-    route_type: Optional[RouteType] = None
-    regularity: Optional[ShippingRegularity] = None
+    route_type: RouteType | None = None
+    regularity: ShippingRegularity | None = None
     # Только для 15-ГА: у аэропорта рейсов нет, зато есть населённый пункт.
-    locality: Optional[str] = None
+    locality: str | None = None
 
 
 def from_airline_indicator(record) -> DetailRow:

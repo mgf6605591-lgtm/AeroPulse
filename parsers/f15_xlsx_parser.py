@@ -13,7 +13,7 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import pandas as pd
 
@@ -46,19 +46,19 @@ ROW_NUMBER_COL = 1
 # Отчётный период листа данных: «за __февраль_2026__г.».
 # Читается только отсюда — из того же листа, откуда берутся цифры, поэтому не может
 # разойтись с ними, если бланк заполняли копированием прошлого месяца (DATA-3).
-PERIOD_CELL: Tuple[int, int] = (6, 0)
+PERIOD_CELL: tuple[int, int] = (6, 0)
 
 # Название аэропорта: «Наименование аэропорта:  ФКП "Аэропорты Севера"».
-AIRPORT_NAME_CELL: Tuple[int, int] = (0, 0)
+AIRPORT_NAME_CELL: tuple[int, int] = (0, 0)
 
 
 class F15XLSXParser(BaseParser):
     """Парсер XLSX отчёта 15-ГА → AirportIndicators (коды 15ГА-Rxx-МЕТРИКА)."""
 
     @classmethod
-    def parse_file(cls, file_name: str, month: Optional[str] = None, year: Optional[int] = None,
-                   entity_type: Optional[str] = None, entity_id: Optional[int] = None,
-                   entity_name: Optional[str] = None) -> Dict:
+    def parse_file(cls, file_name: str, month: str | None = None, year: int | None = None,
+                   entity_type: str | None = None, entity_id: int | None = None,
+                   entity_name: str | None = None) -> dict:
         df, sheet_name = cls._read_f15_sheet(file_name)
 
         # Период: явные параметры вызова > ячейка листа данных. Заглушек нет —
@@ -99,7 +99,7 @@ class F15XLSXParser(BaseParser):
         return "15ГА" in n or "ГА15" in n
 
     @classmethod
-    def _read_f15_sheet(cls, file_name: str) -> Tuple[pd.DataFrame, str]:
+    def _read_f15_sheet(cls, file_name: str) -> tuple[pd.DataFrame, str]:
         """Лист данных 15-ГА вместе с его именем.
 
         Лист шапки («Шапка15ГА») подходит по имени, но не по содержимому: подписей
@@ -114,7 +114,7 @@ class F15XLSXParser(BaseParser):
         return df, name
 
     @classmethod
-    def _period_from_df(cls, df: pd.DataFrame) -> Tuple[Optional[str], Optional[int]]:
+    def _period_from_df(cls, df: pd.DataFrame) -> tuple[str | None, int | None]:
         row, col = PERIOD_CELL
         if df.shape[0] <= row or df.shape[1] <= col:
             return None, None
@@ -139,8 +139,8 @@ class F15XLSXParser(BaseParser):
         return text.strip()
 
     @classmethod
-    def _extract_indicators(cls, df: pd.DataFrame) -> List[Dict[str, Any]]:
-        out: List[Dict[str, Any]] = []
+    def _extract_indicators(cls, df: pd.DataFrame) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
         if df.shape[1] <= ROW_NUMBER_COL:
             return out
 
@@ -194,7 +194,7 @@ class F15XLSXParser(BaseParser):
         return not text.replace(",", ".").replace(".", "").isdigit()
 
     @staticmethod
-    def _row_number(raw) -> Optional[int]:
+    def _row_number(raw) -> int | None:
         """Номер строки бланка (1…9) из графы 2, иначе None."""
         if raw is None or (isinstance(raw, float) and pd.isna(raw)) or isinstance(raw, bool):
             return None
@@ -205,7 +205,7 @@ class F15XLSXParser(BaseParser):
         return number if 1 <= number <= 9 else None
 
     @staticmethod
-    def _cell_decimal(raw) -> Optional[Decimal]:
+    def _cell_decimal(raw) -> Decimal | None:
         """Значение ячейки. Прочерки и «Х» в незаполняемых графах — не значения."""
         if raw is None or (isinstance(raw, float) and pd.isna(raw)):
             return None

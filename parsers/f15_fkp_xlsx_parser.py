@@ -21,7 +21,7 @@
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import pandas as pd
 
@@ -45,14 +45,14 @@ BLOCK_MARKER = "название аэропорта"
 MIN_BLOCKS = 2
 
 # Строка блока → код строки типового бланка. «ВСЕГО» даёт сразу две: см. модуль.
-ROW_LABELS: Tuple[Tuple[str, Tuple[str, ...]], ...] = (
+ROW_LABELS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("1. внутренние регулярные-всего", ("R05",)),
     ("2. внутренние нерегулярные - всего", ("R06",)),
     ("всего", ("R07", "R08")),
 )
 
 # Графа этого бланка → графа типового 15-ГА (ключи `F15_COL_TO_METRIC`).
-FKP_GRAPH_TO_F15_GRAPH: Dict[int, str] = {
+FKP_GRAPH_TO_F15_GRAPH: dict[int, str] = {
     2: "3",    # количество отбывших-прибывших ВС
     3: "4",    # пассажиры отправленные
     5: "5",    # пассажиры принятые
@@ -67,7 +67,7 @@ FKP_GRAPH_TO_F15_GRAPH: Dict[int, str] = {
 }
 
 # Код строки типового бланка → его номер в XML-выгрузке: оттуда берётся название.
-RC_TO_XML_ROW: Dict[str, int] = {rc: code for code, rc in F15_XML_ROW_TO_RC.items()}
+RC_TO_XML_ROW: dict[str, int] = {rc: code for code, rc in F15_XML_ROW_TO_RC.items()}
 
 # Вид перевозок стоит в первой графе, как и в типовом бланке.
 ROW_LABEL_COL = 0
@@ -100,9 +100,9 @@ class F15FKPXLSXParser(BaseParser):
     """Парсер сводного бланка 15-ГА → отчётность каждого аэропорта предприятия."""
 
     @classmethod
-    def parse_file(cls, file_name: str, month: Optional[str] = None, year: Optional[int] = None,
-                   entity_type: Optional[str] = None, entity_id: Optional[int] = None,
-                   entity_name: Optional[str] = None) -> Dict[str, Any]:
+    def parse_file(cls, file_name: str, month: str | None = None, year: int | None = None,
+                   entity_type: str | None = None, entity_id: int | None = None,
+                   entity_name: str | None = None) -> dict[str, Any]:
         df, sheet_name = cls._read_sheet(file_name)
         blocks = cls._blocks(df)
 
@@ -156,7 +156,7 @@ class F15FKPXLSXParser(BaseParser):
         return all(cls._row_codes(df, block) for block in blocks)
 
     @classmethod
-    def _read_sheet(cls, file_name: str) -> Tuple[pd.DataFrame, str]:
+    def _read_sheet(cls, file_name: str) -> tuple[pd.DataFrame, str]:
         df, name = find_sheet(file_name, cls._looks_like_fkp)
         if df is None:
             raise ValueError(
@@ -167,9 +167,9 @@ class F15FKPXLSXParser(BaseParser):
         return df, name
 
     @classmethod
-    def _blocks(cls, df: pd.DataFrame) -> List[Block]:
+    def _blocks(cls, df: pd.DataFrame) -> list[Block]:
         """Блоки листа: подпись «Название аэропорта» открывает блок, следующая — закрывает."""
-        starts: List[Tuple[int, str]] = []
+        starts: list[tuple[int, str]] = []
         for r in range(df.shape[0]):
             for c in range(df.shape[1]):
                 if not _key(df.iloc[r, c]).startswith(BLOCK_MARKER):
@@ -179,7 +179,7 @@ class F15FKPXLSXParser(BaseParser):
                     starts.append((r, name))
                 break
 
-        blocks: List[Block] = []
+        blocks: list[Block] = []
         for index, (row, name) in enumerate(starts):
             last = starts[index + 1][0] - 1 if index + 1 < len(starts) else df.shape[0] - 1
             blocks.append(Block(name, row, last))
@@ -209,9 +209,9 @@ class F15FKPXLSXParser(BaseParser):
         return ""
 
     @classmethod
-    def _row_codes(cls, df: pd.DataFrame, block: Block) -> Dict[int, Tuple[str, ...]]:
+    def _row_codes(cls, df: pd.DataFrame, block: Block) -> dict[int, tuple[str, ...]]:
         """Строки блока: номер строки листа → коды строк типового бланка."""
-        found: Dict[int, Tuple[str, ...]] = {}
+        found: dict[int, tuple[str, ...]] = {}
         if df.shape[1] <= ROW_LABEL_COL:
             return found
         for r in range(block.first_row, min(block.last_row, df.shape[0] - 1) + 1):
@@ -223,17 +223,17 @@ class F15FKPXLSXParser(BaseParser):
         return found
 
     @classmethod
-    def _extract_indicators(cls, df: pd.DataFrame, block: Block) -> List[Dict[str, Any]]:
-        out: List[Dict[str, Any]] = []
+    def _extract_indicators(cls, df: pd.DataFrame, block: Block) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
         for r, codes in sorted(cls._row_codes(df, block).items()):
             for rc in codes:
                 out.extend(cls._row_indicators(df, r, rc))
         return out
 
     @classmethod
-    def _row_indicators(cls, df: pd.DataFrame, row: int, rc: str) -> List[Dict[str, Any]]:
+    def _row_indicators(cls, df: pd.DataFrame, row: int, rc: str) -> list[dict[str, Any]]:
         row_title = F15_ROW_TITLES.get(RC_TO_XML_ROW.get(rc, -1), rc)
-        out: List[Dict[str, Any]] = []
+        out: list[dict[str, Any]] = []
         for graph, std_graph in FKP_GRAPH_TO_F15_GRAPH.items():
             col = graph - 1
             if col >= df.shape[1]:
@@ -252,7 +252,7 @@ class F15FKPXLSXParser(BaseParser):
         return out
 
     @classmethod
-    def _period_from_df(cls, df: pd.DataFrame) -> Tuple[Optional[str], Optional[int]]:
+    def _period_from_df(cls, df: pd.DataFrame) -> tuple[str | None, int | None]:
         """Отчётный период — первая подпись «за __месяц_год__г.» в графе видов перевозок.
 
         Читается с того же листа, где лежат цифры, и той же разборкой, что у

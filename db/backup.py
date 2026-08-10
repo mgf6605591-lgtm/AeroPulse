@@ -13,7 +13,6 @@
 import sqlite3
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
 
 # Сколько копий держать. Значение выбрано так, чтобы переживать серию правок за
 # один день: копии снимаются перед каждой необратимой операцией, а не по времени.
@@ -26,14 +25,14 @@ def backup_dir(db_path: Path) -> Path:
     return db_path.parent / BACKUP_DIR_NAME
 
 
-def backup_name(reason: str, moment: Optional[datetime] = None) -> str:
+def backup_name(reason: str, moment: datetime | None = None) -> str:
     """Имя копии: время и причина, по которой она снята."""
     moment = moment or datetime.now()
     safe_reason = "".join(ch if ch.isalnum() or ch in "-_" else "-" for ch in reason)
     return f"database-{moment:%Y%m%d-%H%M%S}-{safe_reason}.db"
 
 
-def make_backup(db_path: Path, reason: str, keep: int = KEEP_BACKUPS) -> Optional[Path]:
+def make_backup(db_path: Path, reason: str, keep: int = KEEP_BACKUPS) -> Path | None:
     """Снимает копию базы и убирает лишние. Возвращает путь копии или None.
 
     Отсутствие базы — не ошибка: копировать нечего, а операция, ради которой
@@ -61,7 +60,7 @@ def make_backup(db_path: Path, reason: str, keep: int = KEEP_BACKUPS) -> Optiona
     return target
 
 
-def existing_backups(db_path: Path) -> List[Path]:
+def existing_backups(db_path: Path) -> list[Path]:
     """Копии от новых к старым."""
     target_dir = backup_dir(Path(db_path))
     if not target_dir.exists():

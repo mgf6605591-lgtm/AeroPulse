@@ -1,6 +1,6 @@
 # importers/data_importer.py
 from decimal import Decimal
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 from sqlalchemy.exc import OperationalError, IntegrityError
 from db.database import get_session
 from db.models.entities import (
@@ -170,7 +170,7 @@ class DataImporter:
         try:
             indicators_map = cls._resolve_indicators(session, data.get('indicators', []))
 
-            created: List[str] = []
+            created: list[str] = []
             airline, error = cls._resolve_airline(session, data, created)
             if error:
                 return error
@@ -281,7 +281,7 @@ class DataImporter:
 
     @classmethod
     def _resolve_airline(cls, session, data: dict,
-                         created: List[str]) -> Tuple[Optional[Airline], Optional[ImportOutcome]]:
+                         created: list[str]) -> tuple[Airline | None, ImportOutcome | None]:
         """Авиакомпания отчёта: по id, по названию, иначе заводится.
 
         Название в отчёте — уставное («Акционерное общество "Авиакомпания
@@ -324,7 +324,7 @@ class DataImporter:
         return airline, None
 
     @staticmethod
-    def _airline_by_name(session, name: str) -> Optional[Airline]:
+    def _airline_by_name(session, name: str) -> Airline | None:
         """Запись справочника с тем же названием — посимвольно или по приведённому виду."""
         airlines = session.query(Airline).all()
         for airline in airlines:
@@ -337,7 +337,7 @@ class DataImporter:
         return None
 
     @staticmethod
-    def _free_airline_code(session, name: str, preferred: Optional[str]) -> str:
+    def _free_airline_code(session, name: str, preferred: str | None) -> str:
         codes = {code for (code,) in session.query(Airline.code) if code}
         return unique_entity_code(name, codes, preferred=preferred)
 
@@ -431,7 +431,7 @@ class DataImporter:
         return failure(f'Неожиданная ошибка при импорте данных {whose}: {error}')
 
     @staticmethod
-    def _airport_blocks(data: dict) -> List[Dict[str, Any]]:
+    def _airport_blocks(data: dict) -> list[dict[str, Any]]:
         """Отчётность файла, разложенная по аэропортам.
 
         Обычный бланк 15-ГА заполняется на один аэропорт, сводный — на всё
@@ -464,8 +464,8 @@ class DataImporter:
                 session, [row for block in blocks for row in block.get('indicators', [])]
             )
 
-            airports: Dict[str, Airport] = {}
-            created: List[str] = []
+            airports: dict[str, Airport] = {}
+            created: list[str] = []
             for block in blocks:
                 airport, error = cls._resolve_airport(session, block, created)
                 if error:
@@ -519,7 +519,7 @@ class DataImporter:
 
     @classmethod
     def _resolve_airport(cls, session, block: dict,
-                         created: List[str]) -> Tuple[Optional[Airport], Optional[ImportOutcome]]:
+                         created: list[str]) -> tuple[Airport | None, ImportOutcome | None]:
         """Аэропорт блока: по id, по названию, иначе заводится.
 
         Сводный бланк называет тридцать с лишним аэропортов, и требовать, чтобы
@@ -577,7 +577,7 @@ class DataImporter:
         return locality.id
 
     @staticmethod
-    def _link_airport_parents(blocks: List[dict], airports: Dict[str, Airport]) -> None:
+    def _link_airport_parents(blocks: list[dict], airports: dict[str, Airport]) -> None:
         """Проставляет предприятие, в состав которого входит аэропорт.
 
         Состав предприятия берётся из файла: он его и сдаёт. Ручная перестановка
@@ -595,7 +595,7 @@ class DataImporter:
 
     @classmethod
     def _write_airport_block(cls, session, block: dict, indicators_map: dict,
-                             month_enum, year: int) -> Tuple[int, int, int]:
+                             month_enum, year: int) -> tuple[int, int, int]:
         """Строки одного аэропорта за период. Возвращает (добавлено, обновлено, удалено)."""
         airport = block['airport']
         imported = 0
@@ -664,7 +664,7 @@ class DataImporter:
 
     @staticmethod
     def _import_result(total_imported: int, total_updated: int, total_removed: int = 0,
-                       created: Optional[List[str]] = None,
+                       created: list[str] | None = None,
                        register: str = 'аэропортов') -> ImportOutcome:
         """Итог импорта. Ноль записей — отказ, а не успех.
 

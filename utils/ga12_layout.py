@@ -20,7 +20,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, Optional, Tuple
 
 # Разделы бланка. Значения совпадают с именами членов ShippingRegularity:
 # так подписан раздел в форме, и такой же признак хранится у перевозки.
@@ -49,7 +48,7 @@ GA12_SECTION_HEADINGS = {
 #
 # Отсюда правило итога: вид сообщения не входит в сумму, если в ней уже участвует
 # тот, частью которого он является.
-GA12_ROUTE_PARENT: Dict[str, str] = {
+GA12_ROUTE_PARENT: dict[str, str] = {
     "interregional": "local",
     "subsidir": "local",
 }
@@ -82,15 +81,15 @@ class Ga12Row:
     section: str
     okei: str
     xml_row: int
-    blank_number: Optional[int] = None
-    detail_of: Optional[str] = None
-    detail_marker: Optional[str] = None
+    blank_number: int | None = None
+    detail_of: str | None = None
+    detail_marker: str | None = None
 
 
 # Бланк целиком: 10 нумерованных строк регулярных перевозок плюс три строки
 # детализации тоннокилометража, 9 нерегулярных, 1 некоммерческая. Больше в форме
 # строк нет — ни в бланке, ни в метаформе XML.
-GA12_ROWS: Tuple[Ga12Row, ...] = (
+GA12_ROWS: tuple[Ga12Row, ...] = (
     # Регулярные коммерческие перевозки
     Ga12Row("965", "Самолето-километры", "тыс.сам.-км", SECTION_REGULAR, "965", 2, 1),
     Ga12Row("642", "Отправлений воздушных судов", "ед.", SECTION_REGULAR, "642", 3, 2),
@@ -122,29 +121,29 @@ GA12_ROWS: Tuple[Ga12Row, ...] = (
     Ga12Row("356нк", "Налет часов", "час.", SECTION_NON_COMMERCIAL, "356", 27, 20),
 )
 
-GA12_SECTION_ORDER: Tuple[str, ...] = (SECTION_REGULAR, SECTION_IRREGULAR, SECTION_NON_COMMERCIAL)
+GA12_SECTION_ORDER: tuple[str, ...] = (SECTION_REGULAR, SECTION_IRREGULAR, SECTION_NON_COMMERCIAL)
 
-GA12_ROW_BY_CODE: Dict[str, Ga12Row] = {row.code: row for row in GA12_ROWS}
+GA12_ROW_BY_CODE: dict[str, Ga12Row] = {row.code: row for row in GA12_ROWS}
 
 # Ключи разбора: № строки бланка для XLSX, код строки для XML.
-GA12_ROW_BY_BLANK_NUMBER: Dict[int, Ga12Row] = {
+GA12_ROW_BY_BLANK_NUMBER: dict[int, Ga12Row] = {
     row.blank_number: row for row in GA12_ROWS if row.blank_number is not None
 }
-GA12_ROW_BY_XML_ROW: Dict[int, Ga12Row] = {row.xml_row: row for row in GA12_ROWS}
+GA12_ROW_BY_XML_ROW: dict[int, Ga12Row] = {row.xml_row: row for row in GA12_ROWS}
 
 # Строки детализации тоннокилометража: в бланке у них нет номера, опознаются
 # маркером под родительской строкой.
-GA12_DETAIL_ROW_BY_MARKER: Dict[str, Ga12Row] = {
+GA12_DETAIL_ROW_BY_MARKER: dict[str, Ga12Row] = {
     row.detail_marker: row for row in GA12_ROWS if row.detail_marker
 }
 
-GA12_CODES_FLAT: Tuple[str, ...] = tuple(row.code for row in GA12_ROWS)
+GA12_CODES_FLAT: tuple[str, ...] = tuple(row.code for row in GA12_ROWS)
 
-GA12_CODES_BY_SECTION_KEY: Dict[str, Tuple[str, ...]] = {
+GA12_CODES_BY_SECTION_KEY: dict[str, tuple[str, ...]] = {
     section: tuple(row.code for row in GA12_ROWS if row.section == section)
     for section in GA12_SECTION_ORDER
 }
 
-GA12_DETAIL_PARENT_BY_CODE: Dict[str, str] = {
+GA12_DETAIL_PARENT_BY_CODE: dict[str, str] = {
     row.code: row.detail_of for row in GA12_ROWS if row.detail_of
 }

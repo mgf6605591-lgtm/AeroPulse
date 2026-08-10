@@ -8,7 +8,6 @@
 Вкладки строятся по описаниям из `ReferenceService`, а не пишутся по одной на
 справочник: таблица, редактор и набор кнопок у всех четырёх одинаковы.
 """
-from typing import Optional
 
 from PyQt6.QtWidgets import (
     QAbstractItemView, QComboBox, QDialog, QDialogButtonBox, QFormLayout,
@@ -22,8 +21,8 @@ from services.reference_service import KINDS, Kind, ReferenceService, plural
 class ReferenceEditor(QDialog):
     """Редактор одной записи. Поля берутся из описания справочника."""
 
-    def __init__(self, kind: Kind, values: Optional[dict] = None,
-                 row_id: Optional[int] = None, parent=None):
+    def __init__(self, kind: Kind, values: dict | None = None,
+                 row_id: int | None = None, parent=None):
         super().__init__(parent)
         self.kind = kind
         self.row_id = row_id
@@ -162,7 +161,7 @@ class ReferenceTab(QWidget):
             )
         self._update_buttons()
 
-    def selected(self) -> Optional[dict]:
+    def selected(self) -> dict | None:
         index = self.table.currentRow()
         if index < 0 or index >= len(self.rows):
             return None

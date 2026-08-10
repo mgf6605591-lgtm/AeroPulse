@@ -11,7 +11,7 @@
 и сводит годовая сводка: строка «Все прочие операции» в итоги не входит, а во
 внутренних перевозках строка 08 совпадает со строкой 07 «Внутренние — всего».
 """
-from typing import Dict, List, Sequence, Tuple
+from collections.abc import Sequence
 
 from utils.constants import MONTHS_RU, MONTHS_LIST
 
@@ -20,7 +20,7 @@ GA15_SUMMARY_ROW_CODE = "R08"
 
 # Подписи одиннадцати граф. Уровней заголовка два — период и графа, — поэтому
 # группа бланка («ПАССАЖИРЫ», «ГРУЗ», «ПОЧТА») входит в подпись самой графы.
-GA15_SUMMARY_METRIC_HEADERS: Tuple[str, ...] = (
+GA15_SUMMARY_METRIC_HEADERS: tuple[str, ...] = (
     "ВС, ед.",
     "Пасс. отправл.",
     "Пасс. принят.",
@@ -46,7 +46,7 @@ GA15_SUMMARY_TOTAL_TITLE = "Итого:"
 GA15_SUMMARY_CHILD_INDENT = "    "
 
 # Нарастающие итоги сводки: месяц, на котором итог закрывается → его подпись.
-CUMULATIVE_AT_MONTH: Dict[int, str] = {
+CUMULATIVE_AT_MONTH: dict[int, str] = {
     6: "6 месяцев",
     9: "9 месяцев",
     12: "12 месяцев",
@@ -58,7 +58,7 @@ class Ga15PeriodBlock:
 
     __slots__ = ("key", "label", "months")
 
-    def __init__(self, key: str, label: str, months: Tuple[Tuple[int, int], ...]):
+    def __init__(self, key: str, label: str, months: tuple[tuple[int, int], ...]):
         self.key = key
         self.label = label
         # Месяцы, которые складываются в этот блок: пары (год, номер месяца).
@@ -74,7 +74,7 @@ def month_label(year: int, month: int) -> str:
     return f"{MONTHS_RU[key]} {year}"
 
 
-def summary_period_blocks(months: Sequence[Tuple[int, int]]) -> List[Ga15PeriodBlock]:
+def summary_period_blocks(months: Sequence[tuple[int, int]]) -> list[Ga15PeriodBlock]:
     """Колонки сводки по списку месяцев периода (пары «год, номер месяца»).
 
     Порядок — как в годовой сводке: месяцы подряд, после третьего месяца
@@ -83,7 +83,7 @@ def summary_period_blocks(months: Sequence[Tuple[int, int]]) -> List[Ga15PeriodB
     """
     ordered = sorted(set(months))
     present = set(ordered)
-    blocks: List[Ga15PeriodBlock] = []
+    blocks: list[Ga15PeriodBlock] = []
 
     for year, month in ordered:
         blocks.append(
@@ -122,9 +122,9 @@ def summary_columns(blocks: Sequence[Ga15PeriodBlock], metric_tags: Sequence[str
     Возвращает (headers, keys, groups); groups — тройки (первая колонка,
     последняя, подпись периода) для двухуровневого заголовка таблицы.
     """
-    headers: List[str] = [GA15_SUMMARY_ENTITY_HEADER]
-    keys: List[str] = [GA15_SUMMARY_ENTITY_KEY]
-    groups: List[Tuple[int, int, str]] = []
+    headers: list[str] = [GA15_SUMMARY_ENTITY_HEADER]
+    keys: list[str] = [GA15_SUMMARY_ENTITY_KEY]
+    groups: list[tuple[int, int, str]] = []
 
     for block in blocks:
         first = len(headers)

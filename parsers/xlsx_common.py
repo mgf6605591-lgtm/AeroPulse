@@ -9,7 +9,7 @@
 from __future__ import annotations
 
 import re
-from typing import Callable, Iterable, List, Optional, Tuple
+from collections.abc import Callable, Iterable
 
 import pandas as pd
 
@@ -30,7 +30,7 @@ def count_markers(df: pd.DataFrame, markers: Iterable[str]) -> int:
     return sum(1 for marker in markers if marker in text)
 
 
-def sheet_names(file_name: str) -> List[str]:
+def sheet_names(file_name: str) -> list[str]:
     with pd.ExcelFile(file_name) as xl:
         return [str(name) for name in xl.sheet_names]
 
@@ -38,8 +38,8 @@ def sheet_names(file_name: str) -> List[str]:
 def find_sheet(
     file_name: str,
     looks_like: Callable[[pd.DataFrame], bool],
-    name_hint: Optional[Callable[[str], bool]] = None,
-) -> Tuple[Optional[pd.DataFrame], Optional[str]]:
+    name_hint: Callable[[str], bool] | None = None,
+) -> tuple[pd.DataFrame | None, str | None]:
     """Первый лист книги, прошедший проверку по содержимому, вместе с его именем.
 
     Имя листа влияет только на порядок перебора: лист с подходящим именем, но без

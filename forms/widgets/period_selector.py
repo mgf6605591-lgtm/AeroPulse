@@ -17,14 +17,14 @@
 сбрасывать его после импорта нельзя (BUG-25).
 """
 from datetime import date
-from typing import List, Optional, Sequence, Tuple
+from collections.abc import Sequence
 
 from PyQt6.QtWidgets import QComboBox
 
 from utils.constants import APPLY_CAPTION, APPLY_CAPTION_PENDING, MONTHS_RU
 
 
-def year_choices(data_range: Optional[Tuple[int, int]], today_year: int) -> List[int]:
+def year_choices(data_range: tuple[int, int] | None, today_year: int) -> list[int]:
     """Годы для выбора: всё, за что есть отчётность, плюс текущий год.
 
     Текущий добавляется всегда: на пустой базе `get_period_range()` отдаёт

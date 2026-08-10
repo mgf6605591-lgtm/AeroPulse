@@ -8,7 +8,6 @@ SQLite не хранит десятичные числа: у типа `DECIMAL` 
 Расхождение вылезает при суммировании и в младших разрядах официального отчёта.
 """
 from decimal import Decimal
-from typing import Optional
 
 from sqlalchemy import Integer, String
 from sqlalchemy.types import TypeDecorator
@@ -34,7 +33,7 @@ class MonthNumber(TypeDecorator):
     impl = Integer
     cache_ok = True
 
-    def process_bind_param(self, value, dialect) -> Optional[int]:
+    def process_bind_param(self, value, dialect) -> int | None:
         if value is None:
             return None
         if isinstance(value, Months):
@@ -47,7 +46,7 @@ class MonthNumber(TypeDecorator):
             raise ValueError(f"Номер месяца вне диапазона 1…12: {value!r}")
         return number
 
-    def process_result_value(self, value, dialect) -> Optional[Months]:
+    def process_result_value(self, value, dialect) -> Months | None:
         if value is None:
             return None
         if isinstance(value, Months):
@@ -75,7 +74,7 @@ class ExactDecimal(TypeDecorator):
     impl = String
     cache_ok = True
 
-    def process_bind_param(self, value, dialect) -> Optional[str]:
+    def process_bind_param(self, value, dialect) -> str | None:
         if value is None:
             return None
         if not isinstance(value, Decimal):
@@ -85,7 +84,7 @@ class ExactDecimal(TypeDecorator):
         # ни SQLite при сравнении с числовым литералом.
         return format(value, 'f')
 
-    def process_result_value(self, value, dialect) -> Optional[Decimal]:
+    def process_result_value(self, value, dialect) -> Decimal | None:
         if value is None:
             return None
         if isinstance(value, Decimal):

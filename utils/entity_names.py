@@ -14,7 +14,6 @@
 в одно предприятие — а это разные юридические лица, если сдают разные отчёты.
 """
 import re
-from typing import Optional
 
 # Организационно-правовая форма: как её пишут словами → как в справочнике.
 # Порядок применения — от длинных к коротким, иначе «закрытое акционерное
@@ -42,7 +41,7 @@ _LEGAL_FORM_PATTERNS = tuple(
 _NOT_A_LETTER = re.compile(r"[\W_]+", re.UNICODE)
 
 
-def normalized_entity_name(name: Optional[str]) -> str:
+def normalized_entity_name(name: str | None) -> str:
     """Название в виде, пригодном для сравнения. Пустое — если сравнивать нечего."""
     text = str(name or "").lower().replace("ё", "е")
     text = _NOT_A_LETTER.sub(" ", text).strip()
@@ -51,7 +50,7 @@ def normalized_entity_name(name: Optional[str]) -> str:
     return " ".join(text.split())
 
 
-def same_entity_name(left: Optional[str], right: Optional[str]) -> bool:
+def same_entity_name(left: str | None, right: str | None) -> bool:
     """Одно ли это предприятие. Два пустых названия одним предприятием не считаются."""
     normalized = normalized_entity_name(left)
     return bool(normalized) and normalized == normalized_entity_name(right)

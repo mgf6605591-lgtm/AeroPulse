@@ -11,13 +11,13 @@ from __future__ import annotations
 
 import xml.etree.ElementTree as ET
 from decimal import Decimal
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from parsers.base_parser import BaseParser
 from utils.months import month_from_period, period_from_meta_filename
 
 # Код строки XML (f15.xml) → ключ строки в кодах показателей 15ГА-Rxx-...
-F15_XML_ROW_TO_RC: Dict[int, str] = {
+F15_XML_ROW_TO_RC: dict[int, str] = {
     10: "R01",
     20: "R02",
     30: "R03",
@@ -30,7 +30,7 @@ F15_XML_ROW_TO_RC: Dict[int, str] = {
 }
 
 # Код колонки XML → суффикс кода показателя (как в data_controller / ga15)
-F15_COL_TO_METRIC: Dict[str, str] = {
+F15_COL_TO_METRIC: dict[str, str] = {
     "3": "ВС",
     "4": "ПАС_ОТП",
     "5": "ПАС_ПРИН",
@@ -44,7 +44,7 @@ F15_COL_TO_METRIC: Dict[str, str] = {
     "13": "ПЧ_ВСЕГО",
 }
 
-F15_ROW_TITLES: Dict[int, str] = {
+F15_ROW_TITLES: dict[int, str] = {
     10: "Международные регулярные",
     20: "Международные нерегулярные",
     30: "Международные - всего (стр.01+стр.02)",
@@ -56,7 +56,7 @@ F15_ROW_TITLES: Dict[int, str] = {
     90: "Все прочие операции",
 }
 
-F15_COL_TITLES: Dict[str, str] = {
+F15_COL_TITLES: dict[str, str] = {
     "3": "Количество ВС, ед.",
     "4": "Пассажиры отправленные, чел.",
     "5": "Пассажиры принятые, чел.",
@@ -101,12 +101,12 @@ class F15XMLParser(BaseParser):
     def parse_file(
         cls,
         file_name: str,
-        month: Optional[str] = None,
-        year: Optional[int] = None,
-        entity_type: Optional[str] = None,
-        entity_id: Optional[int] = None,
-        entity_name: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        month: str | None = None,
+        year: int | None = None,
+        entity_type: str | None = None,
+        entity_id: int | None = None,
+        entity_name: str | None = None,
+    ) -> dict[str, Any]:
         tree = ET.parse(file_name)
         root = tree.getroot()
         if cls.is_meta_template_only(root):
@@ -122,13 +122,13 @@ class F15XMLParser(BaseParser):
     def _parse_root(
         cls,
         root: ET.Element,
-        month: Optional[str],
-        year: Optional[int],
-        entity_type: Optional[str],
-        entity_id: Optional[int],
-        entity_name: Optional[str],
+        month: str | None,
+        year: int | None,
+        entity_type: str | None,
+        entity_id: int | None,
+        entity_name: str | None,
         file_name: str = "",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         year_attr = root.get("year")
         try:
             file_year = int(year_attr) if year_attr else None
@@ -173,8 +173,8 @@ class F15XMLParser(BaseParser):
         }
 
     @classmethod
-    def _extract_indicators(cls, root: ET.Element) -> List[Dict[str, Any]]:
-        out: List[Dict[str, Any]] = []
+    def _extract_indicators(cls, root: ET.Element) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
         for row in root.findall(".//sections/section/row"):
             code_attr = row.get("code")
             if not code_attr:
@@ -189,7 +189,7 @@ class F15XMLParser(BaseParser):
 
             row_title = F15_ROW_TITLES.get(rcode, row.get("name", "").strip() or f"Строка {rcode}")
 
-            cols: Dict[str, str] = {}
+            cols: dict[str, str] = {}
             for col in row.findall("col"):
                 c = col.get("code")
                 if c is not None and col.text is not None:
@@ -225,7 +225,7 @@ class F15XMLParser(BaseParser):
         return "т"
 
     @classmethod
-    def _parse_cell_value(cls, text: Optional[str]) -> Optional[Decimal]:
+    def _parse_cell_value(cls, text: str | None) -> Decimal | None:
         if text is None:
             return None
         t = text.strip()

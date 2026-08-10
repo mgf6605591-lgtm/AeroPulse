@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import xml.etree.ElementTree as ET
 from decimal import Decimal
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from parsers.base_parser import BaseParser
 from utils.ga12_layout import GA12_ROW_BY_XML_ROW
@@ -36,12 +36,12 @@ class XMLParser(BaseParser):
     def parse_file(
         cls,
         file_name: str,
-        month: Optional[str] = None,
-        year: Optional[int] = None,
-        entity_type: Optional[str] = None,
-        entity_id: Optional[int] = None,
-        entity_name: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        month: str | None = None,
+        year: int | None = None,
+        entity_type: str | None = None,
+        entity_id: int | None = None,
+        entity_name: str | None = None,
+    ) -> dict[str, Any]:
         tree = ET.parse(file_name)
         return cls._parse_root(
             tree.getroot(), month, year, entity_type, entity_id, entity_name, file_name
@@ -51,13 +51,13 @@ class XMLParser(BaseParser):
     def _parse_root(
         cls,
         root: ET.Element,
-        month: Optional[str],
-        year: Optional[int],
-        entity_type: Optional[str],
-        entity_id: Optional[int],
-        entity_name: Optional[str],
+        month: str | None,
+        year: int | None,
+        entity_type: str | None,
+        entity_id: int | None,
+        entity_name: str | None,
         file_name: str = "",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Разбор уже прочитанного дерева.
 
         Отдельно от `parse_file`, чтобы вызывающему, который разобрал файл ради
@@ -120,8 +120,8 @@ class XMLParser(BaseParser):
         }
 
     @classmethod
-    def _extract_indicators(cls, root: ET.Element) -> List[Dict[str, Any]]:
-        out: List[Dict[str, Any]] = []
+    def _extract_indicators(cls, root: ET.Element) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
         for row in root.findall(".//sections/section/row"):
             code_attr = row.get("code")
             if not code_attr:
@@ -134,7 +134,7 @@ class XMLParser(BaseParser):
             if blank_row is None:
                 continue
 
-            cols: Dict[str, str] = {}
+            cols: dict[str, str] = {}
             for col in row.findall("col"):
                 c = col.get("code")
                 if c is not None and col.text is not None:
@@ -181,7 +181,7 @@ class XMLParser(BaseParser):
         return out
 
     @classmethod
-    def _parse_decimal(cls, text: Optional[str]) -> Optional[Decimal]:
+    def _parse_decimal(cls, text: str | None) -> Decimal | None:
         if text is None or text == "":
             return None
         t = text.strip().replace(",", ".")

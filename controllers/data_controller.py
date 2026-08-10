@@ -9,7 +9,7 @@
 Подробная таблица осталась здесь: она одна на обе формы и отличается между ними
 только набором колонок.
 """
-from typing import Any, Dict, Optional
+from typing import Any
 
 from controllers.airline_ind_service import AirlineIndicatorService
 from controllers.airport_ind_service import AirportIndicatorService
@@ -34,7 +34,7 @@ class DataController:
         self.pivot_model = pivot_model
         self.detail_model = detail_model
 
-    def load_pivot_data(self, mode: int, filters: ReportFilters, entity_id: Optional[int] = None) -> Dict[str, Any]:
+    def load_pivot_data(self, mode: int, filters: ReportFilters, entity_id: int | None = None) -> dict[str, Any]:
         """Загружает данные для сводной таблицы"""
         if mode == MODE_AIRLINE:
             lay = (filters or NO_FILTERS).pivot_table_layout or PIVOT_LAYOUT_BY_ROUTES
@@ -54,7 +54,7 @@ class DataController:
                 return ga15_airport.build(filters, entity_id)
             return ga15_summary.build(filters)
 
-    def load_detail_data(self, mode: int, filters: ReportFilters) -> Dict[str, Any]:
+    def load_detail_data(self, mode: int, filters: ReportFilters) -> dict[str, Any]:
         """Загружает данные для подробной таблицы"""
         if mode == MODE_AIRLINE:
             # Регулярность выводится рядом с типом маршрута: вдвоём они и образуют

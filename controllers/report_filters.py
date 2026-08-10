@@ -19,12 +19,13 @@
 контракта значило бы менять две вещи одним движением.
 """
 from dataclasses import dataclass, replace
-from typing import Any, Optional, Sequence, Tuple
+from typing import Any
+from collections.abc import Sequence
 
-Period = Tuple[int, int]
+Period = tuple[int, int]
 
 
-def _only(values: Sequence[Any]) -> Optional[Any]:
+def _only(values: Sequence[Any]) -> Any | None:
     """Единственный элемент последовательности — иначе None."""
     return values[0] if len(values) == 1 else None
 
@@ -33,35 +34,35 @@ def _only(values: Sequence[Any]) -> Optional[Any]:
 class ReportFilters:
     """Что показывать в отчёте. Пустой набор означает «всё без ограничений»."""
 
-    airline_ids: Tuple[int, ...] = ()
-    airport_ids: Tuple[int, ...] = ()
-    indicator_ids: Tuple[int, ...] = ()
+    airline_ids: tuple[int, ...] = ()
+    airport_ids: tuple[int, ...] = ()
+    indicator_ids: tuple[int, ...] = ()
     # Члены перечисления RouteType, как их отдаёт кнопка фильтра.
-    route_types: Tuple[Any, ...] = ()
-    period_from: Optional[Period] = None
-    period_to: Optional[Period] = None
-    pivot_table_layout: Optional[str] = None
+    route_types: tuple[Any, ...] = ()
+    period_from: Period | None = None
+    period_to: Period | None = None
+    pivot_table_layout: str | None = None
 
     # --- производные значения ---------------------------------------------
 
     @property
-    def airline_id(self) -> Optional[int]:
+    def airline_id(self) -> int | None:
         return _only(self.airline_ids)
 
     @property
-    def airport_id(self) -> Optional[int]:
+    def airport_id(self) -> int | None:
         return _only(self.airport_ids)
 
     @property
-    def indicator_id(self) -> Optional[int]:
+    def indicator_id(self) -> int | None:
         return _only(self.indicator_ids)
 
     @property
-    def route_type(self) -> Optional[Any]:
+    def route_type(self) -> Any | None:
         return _only(self.route_types)
 
     @property
-    def entity_id(self) -> Optional[int]:
+    def entity_id(self) -> int | None:
         """Единственное выбранное предприятие — по нему выбирается вид свода.
 
         Прежде вызывающий перебирал четыре ключа подряд: `airline_id`,
@@ -72,7 +73,7 @@ class ReportFilters:
         return airline if airline is not None else self.airport_id
 
     @property
-    def period(self) -> Optional[Tuple[Period, Period]]:
+    def period(self) -> tuple[Period, Period] | None:
         """Обе границы или None: половина периода периодом не является."""
         if self.period_from is None or self.period_to is None:
             return None
@@ -105,5 +106,5 @@ def with_airport(filters: ReportFilters, airport_id: int) -> ReportFilters:
     return _replace(filters, airport_ids=(int(airport_id),))
 
 
-def _replace(filters: Optional[ReportFilters], **changes) -> ReportFilters:
+def _replace(filters: ReportFilters | None, **changes) -> ReportFilters:
     return replace(filters or NO_FILTERS, **changes)

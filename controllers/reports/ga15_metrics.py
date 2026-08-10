@@ -6,17 +6,16 @@
 одна и та же галочка в фильтре означала бы в них разное.
 """
 import re
-from typing import Dict, List, Optional, Set
 
 from controllers.report_filters import NO_FILTERS, ReportFilters
 from db.models.entities import Indicator
 from utils.ga15_airport_layout import GA15_METRIC_TAGS, GA15_TABLE_ROWS, Ga15RowSpec
 
 # Псевдонимы кода показателя → канонический код вида 15ГА-R05-ПАС_ОТП
-CODE_ALIASES: Dict[str, str] = {}
+CODE_ALIASES: dict[str, str] = {}
 
 
-def metric_code_candidates(row_code: str, tag: str) -> List[str]:
+def metric_code_candidates(row_code: str, tag: str) -> list[str]:
     keys = [f"15ГА-{row_code}-{tag}"]
     if re.fullmatch(r"R\d{2}", row_code):
         n = int(row_code[1:])
@@ -24,7 +23,7 @@ def metric_code_candidates(row_code: str, tag: str) -> List[str]:
     return keys
 
 
-def selected_codes(session, filters: Optional[ReportFilters]) -> Optional[Set[str]]:
+def selected_codes(session, filters: ReportFilters | None) -> set[str] | None:
     """Коды выбранных показателей. None — отбора нет, показывать бланк целиком.
 
     Фильтр хранит id, а бланк 15-ГА собирается по кодам, поэтому перевод нужен
@@ -40,14 +39,14 @@ def selected_codes(session, filters: Optional[ReportFilters]) -> Optional[Set[st
     return {CODE_ALIASES.get(code, code) for code in codes if code}
 
 
-def metric_in_filter(selected: Optional[Set[str]], row_code: str, tag: str) -> bool:
+def metric_in_filter(selected: set[str] | None, row_code: str, tag: str) -> bool:
     """Попадает ли графа строки бланка в отбор показателей."""
     if selected is None:
         return True
     return any(key in selected for key in metric_code_candidates(row_code, tag))
 
 
-def _row_in_filter(spec: Ga15RowSpec, selected: Optional[Set[str]]) -> bool:
+def _row_in_filter(spec: Ga15RowSpec, selected: set[str] | None) -> bool:
     """Осталась ли у строки бланка хоть одна заполняемая графа в отборе.
 
     Графы с «Х» не считаются: они не заполняются в самом бланке, и строка,
@@ -62,7 +61,7 @@ def _row_in_filter(spec: Ga15RowSpec, selected: Optional[Set[str]]) -> bool:
     )
 
 
-def specs_in_filter(selected: Optional[Set[str]]) -> List[Ga15RowSpec]:
+def specs_in_filter(selected: set[str] | None) -> list[Ga15RowSpec]:
     """Строки бланка, остающиеся на экране при заданном отборе (FUNC-7).
 
     Заголовок раздела и «в том числе:» держатся на том, что под ними: без

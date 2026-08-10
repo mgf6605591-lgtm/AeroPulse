@@ -1,5 +1,5 @@
 # forms/models/pivot_dict_model.py
-from typing import List, Dict, Any, Optional
+from typing import Any
 from PyQt6.QtCore import QAbstractTableModel, Qt, QModelIndex
 
 from forms.models.formatting import format_number_ru
@@ -10,13 +10,13 @@ from decimal import Decimal
 class PivotDictModel(QAbstractTableModel):
     """Модель для сводной (pivot) таблицы. Данные — список словарей (строк)."""
 
-    def __init__(self, data: List[Dict] = None, headers: List[str] = None, keys: List[str] = None, parent=None):
+    def __init__(self, data: list[dict] = None, headers: list[str] = None, keys: list[str] = None, parent=None):
         super().__init__(parent)
         self._data = data or []
         self._headers = headers or []
         self._keys = keys or []
 
-    def set_source_data(self, data: List[Dict], headers: List[str], keys: List[str]):
+    def set_source_data(self, data: list[dict], headers: list[str], keys: list[str]):
         """Установка данных модели.
 
         Метод назывался `setData` и перекрывал `QAbstractItemModel.setData(index,
@@ -77,7 +77,7 @@ class PivotDictModel(QAbstractTableModel):
             return Qt.ItemFlag.NoItemFlags
         return Qt.ItemFlag.ItemIsEnabled | Qt.ItemFlag.ItemIsSelectable
 
-    def get_row(self, row: int) -> Optional[Dict]:
+    def get_row(self, row: int) -> dict | None:
         if 0 <= row < len(self._data):
             return self._data[row]
         return None

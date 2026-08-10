@@ -10,26 +10,26 @@
 Кеш общий, потому что общий его источник — одна база на одного пользователя.
 Инвалидация одна на всех: `reference_cache.clear()`.
 """
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
 class ReferenceDataCache:
     """Списки справочников: читаются один раз до явного сброса."""
 
     def __init__(self) -> None:
-        self._entities: Dict[int, List[Any]] = {}
-        self._indicators: Optional[List[Any]] = None
+        self._entities: dict[int, list[Any]] = {}
+        self._indicators: list[Any] | None = None
 
-    def entities(self, mode: int) -> Optional[List[Any]]:
+    def entities(self, mode: int) -> list[Any] | None:
         return self._entities.get(mode)
 
-    def put_entities(self, mode: int, rows: List[Any]) -> None:
+    def put_entities(self, mode: int, rows: list[Any]) -> None:
         self._entities[mode] = rows
 
-    def indicators(self) -> Optional[List[Any]]:
+    def indicators(self) -> list[Any] | None:
         return self._indicators
 
-    def put_indicators(self, rows: List[Any]) -> None:
+    def put_indicators(self, rows: list[Any]) -> None:
         self._indicators = rows
 
     def clear(self) -> None:

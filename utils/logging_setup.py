@@ -16,7 +16,6 @@ import logging
 import sys
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
-from typing import Optional
 
 from utils.paths import get_app_dir
 
@@ -36,7 +35,7 @@ def log_path() -> Path:
     return get_app_dir() / LOG_FILE_NAME
 
 
-def setup_logging(level: int = logging.INFO, path: Optional[Path] = None) -> Optional[Path]:
+def setup_logging(level: int = logging.INFO, path: Path | None = None) -> Path | None:
     """Настраивает журнал один раз за запуск. Возвращает путь файла или None.
 
     Невозможность писать журнал не должна мешать работать: у пользователя может
@@ -52,7 +51,7 @@ def setup_logging(level: int = logging.INFO, path: Optional[Path] = None) -> Opt
     root.setLevel(level)
 
     target = Path(path) if path else log_path()
-    written: Optional[Path] = None
+    written: Path | None = None
     try:
         target.parent.mkdir(parents=True, exist_ok=True)
         file_handler = RotatingFileHandler(

@@ -1,4 +1,4 @@
-from typing import Any, List
+from typing import Any
 from controllers.report_filters import ReportFilters
 from controllers.period_filter import apply_period_filter
 from db.models.entities import Airport, AirportIndicators, Indicator
@@ -9,7 +9,7 @@ from sqlalchemy.orm import joinedload
 class AirportIndController:
 
     @classmethod
-    def get_all_indicators(cls, session) -> List[AirportIndicators]:
+    def get_all_indicators(cls, session) -> list[AirportIndicators]:
         query = select(AirportIndicators).options(
             joinedload(AirportIndicators.indicator),
             joinedload(AirportIndicators.airport).joinedload(Airport.locality)
@@ -19,7 +19,7 @@ class AirportIndController:
 
 
     @classmethod
-    def aggregate(cls, session, filters: ReportFilters) -> List[Any]:
+    def aggregate(cls, session, filters: ReportFilters) -> list[Any]:
         """Ячейки свода 15-ГА одним запросом: сумма по показателю и периоду (PERF-2).
 
         Аэропорт входит в группировку: свод по всем аэропортам выводит строку на
@@ -56,7 +56,7 @@ class AirportIndController:
         return session.execute(query).all()
 
     @classmethod
-    def filter_indicators(cls, session, filters: ReportFilters) -> List[AirportIndicators]:
+    def filter_indicators(cls, session, filters: ReportFilters) -> list[AirportIndicators]:
         """Фильтрация показателей аэропортов с поддержкой диапазона периода."""
         query = select(AirportIndicators).options(
             joinedload(AirportIndicators.indicator),

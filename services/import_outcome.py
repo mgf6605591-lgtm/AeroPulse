@@ -20,7 +20,6 @@
 В `importers/` он завёл бы ребро `forms → importers`, которого нет.
 """
 from dataclasses import dataclass, replace
-from typing import Optional, Tuple
 
 __all__ = ["ImportOutcome", "PeriodRequired", "failure", "replace"]
 
@@ -38,19 +37,19 @@ class ImportOutcome:
     message: str = ""
 
     # Дописывает `ImportService`: разбор знает содержимое файла, но не его имя.
-    source_file: Optional[str] = None
-    sheet_name: Optional[str] = None
+    source_file: str | None = None
+    sheet_name: str | None = None
 
     # Отчётный период файла. Месяц — имя члена `Months`, как его отдаёт разбор.
-    month: Optional[str] = None
-    year: Optional[int] = None
+    month: str | None = None
+    year: int | None = None
 
     imported: int = 0
     updated: int = 0
     removed: int = 0
     # Записи, заведённые в справочнике по ходу импорта: они перечисляются
     # пользователю поимённо, молча пополнять справочник нельзя.
-    created_entities: Tuple[str, ...] = ()
+    created_entities: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

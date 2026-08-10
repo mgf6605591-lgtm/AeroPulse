@@ -1,6 +1,6 @@
 # controllers/filter_controller.py
 import logging
-from typing import Dict, Optional, Tuple, Any
+from typing import Any
 from sqlalchemy import func, select
 from controllers.reference_cache import ReferenceDataCache, reference_cache
 from controllers.report_filters import ReportFilters
@@ -46,7 +46,7 @@ def period_is_inverted(bounds) -> bool:
 class FilterController:
     """Контроллер для управления фильтрами"""
 
-    def __init__(self, cache: Optional[ReferenceDataCache] = None):
+    def __init__(self, cache: ReferenceDataCache | None = None):
         # Кеш общий на приложение: свой у каждого экземпляра означал бы, что сброс
         # после импорта не виден остальным виджетам фильтров (BUG-7, ARCH-7).
         self._cache = cache if cache is not None else reference_cache
@@ -95,7 +95,7 @@ class FilterController:
             log.exception("Не удалось загрузить список показателей")
             return []
 
-    def get_period_range(self) -> Tuple[int, int, int, int]:
+    def get_period_range(self) -> tuple[int, int, int, int]:
         """Получает минимальный и максимальный год и месяц из данных"""
         try:
             with get_session() as session:
@@ -129,9 +129,9 @@ class FilterController:
         они выводятся из списков самим `ReportFilters`, а прежде вычислялись при
         записи и читались дальше как самостоятельные ключи (ARCH-5).
         """
-        airline_ids: Tuple[int, ...] = ()
-        airport_ids: Tuple[int, ...] = ()
-        route_types: Tuple[Any, ...] = ()
+        airline_ids: tuple[int, ...] = ()
+        airport_ids: tuple[int, ...] = ()
+        route_types: tuple[Any, ...] = ()
         layout = None
 
         if filter_widget.current_mode == MODE_AIRLINE:
@@ -166,12 +166,12 @@ class FilterController:
         )
 
     @staticmethod
-    def _indicator_ids(widget) -> Tuple[int, ...]:
+    def _indicator_ids(widget) -> tuple[int, ...]:
         ind_ids = widget.get_indicator_filter_ids()
         return () if ind_ids is None else tuple(int(x) for x in ind_ids)
 
     @staticmethod
-    def _period(widget) -> Dict[str, Any]:
+    def _period(widget) -> dict[str, Any]:
         bounds = period_from_widget(widget)
         if bounds is None:
             return {}

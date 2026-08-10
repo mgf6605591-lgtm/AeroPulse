@@ -1,5 +1,4 @@
 # forms/widgets/multilevel_header.py
-from typing import List, Tuple, Optional
 from PyQt6.QtWidgets import QHeaderView
 from PyQt6.QtCore import Qt, QRect, QSize
 from PyQt6.QtGui import QPainter, QPalette
@@ -13,7 +12,7 @@ class MultiLevelHeaderView(QHeaderView):
 
     def __init__(self, parent=None):
         super().__init__(Qt.Orientation.Horizontal, parent)
-        self._groups: List[Tuple[int, int, str]] = []
+        self._groups: list[tuple[int, int, str]] = []
         self._group_height = 26
 
         # Секция не подсвечивается и не нажимается: `paintSection` ни разу не
@@ -34,13 +33,13 @@ class MultiLevelHeaderView(QHeaderView):
         # изменения ширины, — иначе тянуть можно, но не догадаешься.
         self.setMouseTracking(True)
 
-    def set_groups(self, groups: List[Tuple[int, int, str]]):
+    def set_groups(self, groups: list[tuple[int, int, str]]):
         """groups = список кортежей (first_col, last_col_inclusive, label)."""
         self._groups = groups or []
         self.updateGeometries()
         self.viewport().update()
 
-    def _find_group(self, col: int) -> Optional[Tuple[int, int, str]]:
+    def _find_group(self, col: int) -> tuple[int, int, str] | None:
         for g in self._groups:
             if g[0] <= col <= g[1]:
                 return g
@@ -93,7 +92,7 @@ class MultiLevelHeaderView(QHeaderView):
         if group_rect is not None:
             self._paint_group_header(painter, group_rect, label)
 
-    def _visible_group_rect(self, first: int, last: int, top: int) -> Optional[QRect]:
+    def _visible_group_rect(self, first: int, last: int, top: int) -> QRect | None:
         """Видимая часть полосы группы, или None, если группа целиком за краем.
 
         Подпись центрируется по видимой части, поэтому у наполовину прокрученной
@@ -151,6 +150,6 @@ class MultiLevelHeaderView(QHeaderView):
         painter.setFont(font)
         painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, label)
 
-    def get_groups(self) -> List[Tuple[int, int, str]]:
+    def get_groups(self) -> list[tuple[int, int, str]]:
         """Копия групп заголовка (first_col, last_col, подпись) для экспорта в XLSX."""
         return list(self._groups)

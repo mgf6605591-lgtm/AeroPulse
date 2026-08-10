@@ -1,6 +1,6 @@
 """Бланк 15-ГА на один аэропорт — той же раскладкой, что и в типовом Excel."""
 from decimal import Decimal
-from typing import Any, Dict, List
+from typing import Any
 
 from controllers.airport_ind_service import AirportIndicatorService
 from controllers.report_filters import ReportFilters, with_airport
@@ -18,7 +18,7 @@ from utils.ga15_airport_layout import (
 )
 
 
-def _sum_metric(agg: Dict[str, Decimal], row_code: str, tag: str) -> tuple:
+def _sum_metric(agg: dict[str, Decimal], row_code: str, tag: str) -> tuple:
     total = Decimal("0")
     found = False
     for key in ga15_metrics.metric_code_candidates(row_code, tag):
@@ -29,13 +29,13 @@ def _sum_metric(agg: Dict[str, Decimal], row_code: str, tag: str) -> tuple:
     return total, found
 
 
-def build(filters: ReportFilters, airport_id: int) -> Dict[str, Any]:
+def build(filters: ReportFilters, airport_id: int) -> dict[str, Any]:
     """Свод 15-ГА для одного аэропорта (структура как в типовом Excel)."""
     airport_filters = with_airport(filters, airport_id)
 
     rows = AirportIndicatorService.aggregate(airport_filters)
 
-    agg: Dict[str, Decimal] = {}
+    agg: dict[str, Decimal] = {}
     n_records = 0
     for row in rows:
         code = (row.indicator_code or "").strip()
@@ -52,7 +52,7 @@ def build(filters: ReportFilters, airport_id: int) -> Dict[str, Any]:
         selected = ga15_metrics.selected_codes(session, filters)
 
     period_label = period_label_ru(filters)
-    pivot_rows: List[Dict[str, Any]] = []
+    pivot_rows: list[dict[str, Any]] = []
     visible = ga15_metrics.specs_in_filter(selected)
 
     for spec in visible:

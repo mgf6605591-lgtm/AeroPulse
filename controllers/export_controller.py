@@ -10,7 +10,7 @@
 сюда приходят готовые заголовки и строки значений.
 """
 from decimal import Decimal
-from typing import List, Tuple, Optional, Any
+from typing import Any
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font
@@ -63,7 +63,7 @@ class ExportController:
         return cell
 
     @staticmethod
-    def _write_header(ws, header: Optional[ExportHeader]) -> int:
+    def _write_header(ws, header: ExportHeader | None) -> int:
         """Пишет шапку отчёта и возвращает номер строки, с которой идёт таблица.
 
         Без шапки книга получалась обезличенной: ни предприятия, ни периода, а
@@ -87,10 +87,10 @@ class ExportController:
     @staticmethod
     def write_workbook(
         file_path: str,
-        headers: List[str],
-        rows: List[List[Any]],
-        header_groups: Optional[List[Tuple[int, int, str]]] = None,
-        header: Optional[ExportHeader] = None,
+        headers: list[str],
+        rows: list[list[Any]],
+        header_groups: list[tuple[int, int, str]] | None = None,
+        header: ExportHeader | None = None,
     ) -> None:
         """Пишет книгу. Об ошибке сообщает исключением, а не окном и не `False`.
 

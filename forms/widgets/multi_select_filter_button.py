@@ -1,7 +1,7 @@
 # forms/widgets/multi_select_filter_button.py
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any
 
 from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
@@ -22,7 +22,7 @@ from PyQt6.QtWidgets import (
 GROUP_SEPARATOR = " — "
 
 
-def split_group(label: str) -> Tuple[Optional[str], str]:
+def split_group(label: str) -> tuple[str | None, str]:
     """Делит подпись на раздел и собственное название. None — раздела нет.
 
     Иерархию можно было бы взять из `Indicator.parent_id`, как предлагал разбор,
@@ -36,10 +36,10 @@ def split_group(label: str) -> Tuple[Optional[str], str]:
     return head.strip(), tail.strip()
 
 
-def group_items(items: List[Tuple[Any, str]]) -> List[Tuple[Optional[str], List[Tuple[Any, str]]]]:
+def group_items(items: list[tuple[Any, str]]) -> list[tuple[str | None, list[tuple[Any, str]]]]:
     """Раскладывает список по разделам, сохраняя порядок их появления."""
-    groups: List[Tuple[Optional[str], List[Tuple[Any, str]]]] = []
-    index: Dict[Optional[str], int] = {}
+    groups: list[tuple[str | None, list[tuple[Any, str]]]] = []
+    index: dict[str | None, int] = {}
     for value, label in items:
         group, leaf = split_group(label)
         if group not in index:
@@ -69,14 +69,14 @@ class MultiSelectDialog(QDialog):
     (FUNC-10).
     """
 
-    def __init__(self, title: str, items: List[Tuple[Any, str]],
-                 checked: Set[Any], parent=None):
+    def __init__(self, title: str, items: list[tuple[Any, str]],
+                 checked: set[Any], parent=None):
         super().__init__(parent)
         self.setWindowTitle(title)
         self.setMinimumSize(460, 520)
 
-        self._leaves: List[Tuple[Any, QTreeWidgetItem]] = []
-        self._groups: List[QTreeWidgetItem] = []
+        self._leaves: list[tuple[Any, QTreeWidgetItem]] = []
+        self._groups: list[QTreeWidgetItem] = []
         self._total = len(items)
 
         layout = QVBoxLayout(self)
@@ -116,7 +116,7 @@ class MultiSelectDialog(QDialog):
 
     # --- построение --------------------------------------------------------
 
-    def _build(self, items, checked: Set[Any]) -> None:
+    def _build(self, items, checked: set[Any]) -> None:
         groups = group_items(items)
         grouped = worth_grouping(groups)
 
@@ -171,10 +171,10 @@ class MultiSelectDialog(QDialog):
 
     # --- состояние ---------------------------------------------------------
 
-    def visible_ids(self) -> List[Any]:
+    def visible_ids(self) -> list[Any]:
         return [value for value, item in self._leaves if not item.isHidden()]
 
-    def checked_ids(self) -> Set[Any]:
+    def checked_ids(self) -> set[Any]:
         return {
             value for value, item in self._leaves
             if item.checkState(0) == Qt.CheckState.Checked
@@ -196,7 +196,7 @@ class MultiSelectDialog(QDialog):
                 item.setCheckState(0, state)
 
 
-def _full_label(group: Optional[str], leaf: str) -> str:
+def _full_label(group: str | None, leaf: str) -> str:
     return f"{group}{GROUP_SEPARATOR}{leaf}" if group else leaf
 
 
@@ -211,15 +211,15 @@ class MultiSelectFilterButton(QPushButton):
     def __init__(self, title: str, parent=None):
         super().__init__(parent)
         self._title = title
-        self._items: List[Tuple[Any, str]] = []
-        self._selected: Set[Any] = set()
+        self._items: list[tuple[Any, str]] = []
+        self._selected: set[Any] = set()
         self.clicked.connect(self._open_dialog)
         self._update_caption()
 
-    def set_items(self, items: List[Tuple[Any, str]]):
+    def set_items(self, items: list[tuple[Any, str]]):
         """Список (id, подпись). id должен быть hashable; дубликаты id отбрасываются."""
-        seen: Set[Any] = set()
-        out: List[Tuple[Any, str]] = []
+        seen: set[Any] = set()
+        out: list[tuple[Any, str]] = []
         for v, lbl in items:
             if v is None or v in seen:
                 continue
@@ -234,7 +234,7 @@ class MultiSelectFilterButton(QPushButton):
         self._selected = set()
         self._update_caption()
 
-    def filter_active_ids(self) -> Optional[List[Any]]:
+    def filter_active_ids(self) -> list[Any] | None:
         """
         None — не ограничивать (все).
         Список id — только выбранные (подмножество справочника).

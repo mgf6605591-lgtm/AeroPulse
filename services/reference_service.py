@@ -14,7 +14,8 @@
 и обращение к их полям падает (BUG-14).
 """
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any
+from collections.abc import Callable
 
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
@@ -39,8 +40,8 @@ class Field:
     label: str
     kind: str = "text"          # text | ref
     required: bool = True
-    max_length: Optional[int] = None
-    ref: Optional[str] = None   # ключ справочника, если kind == "ref"
+    max_length: int | None = None
+    ref: str | None = None   # ключ справочника, если kind == "ref"
     allow_empty: bool = False   # для необязательной ссылки
 
 
@@ -54,7 +55,7 @@ class Column:
     # Ключ колонки для этого не годится — `parent_id` есть и у показателя
     # (родительская строка бланка), и у аэропорта (предприятие), и подписи для
     # них лежат в разных справочниках.
-    ref: Optional[str] = None
+    ref: str | None = None
 
 
 @dataclass(frozen=True)
@@ -62,18 +63,18 @@ class Kind:
     key: str
     title: str
     model: type
-    columns: Tuple[Column, ...]
-    fields: Tuple[Field, ...]
+    columns: tuple[Column, ...]
+    fields: tuple[Field, ...]
     order_by: str
     has_active: bool = False
     # Сколько записей ссылается на строку справочника. Ноль означает, что удалить
     # её безопасно; всё остальное — что за ней стоят данные.
-    usage: Optional[Callable[[Any, int], int]] = None
+    usage: Callable[[Any, int], int] | None = None
     # Три формы для согласования с числом: 1 строка, 2 строки, 5 строк.
-    usage_forms: Tuple[str, str, str] = ("связанная запись", "связанные записи", "связанных записей")
+    usage_forms: tuple[str, str, str] = ("связанная запись", "связанные записи", "связанных записей")
 
 
-def plural(count: int, forms: Tuple[str, str, str]) -> str:
+def plural(count: int, forms: tuple[str, str, str]) -> str:
     """Существительное в форме, согласованной с числом."""
     tail_100 = abs(count) % 100
     tail_10 = abs(count) % 10
@@ -115,7 +116,7 @@ def _indicator_usage(session, indicator_id: int) -> int:
     return airline + airport
 
 
-KINDS: Dict[str, Kind] = {
+KINDS: dict[str, Kind] = {
     "locality": Kind(
         key="locality",
         title="Населённые пункты",
@@ -216,13 +217,13 @@ class ReferenceService:
         return KINDS[key]
 
     @classmethod
-    def list_rows(cls, key: str) -> List[dict]:
+    def list_rows(cls, key: str) -> list[dict]:
         """Строки справочника вместе с числом ссылающихся записей."""
         kind = KINDS[key]
         with get_session() as session:
             rows = session.query(kind.model).order_by(getattr(kind.model, kind.order_by)).all()
             labels = cls._ref_labels(session)
-            out: List[dict] = []
+            out: list[dict] = []
             for row in rows:
                 item: dict = {"id": row.id}
                 for column in kind.columns:
@@ -234,7 +235,7 @@ class ReferenceService:
             return out
 
     @classmethod
-    def raw_values(cls, key: str, row_id: int) -> Optional[dict]:
+    def raw_values(cls, key: str, row_id: int) -> dict | None:
         """Значения полей как они лежат в базе — для редактора.
 
         В отличие от list_rows, ссылки отдаются идентификаторами: редактору нужно
@@ -248,7 +249,7 @@ class ReferenceService:
             return {field.name: getattr(row, field.name, None) for field in kind.fields}
 
     @classmethod
-    def choices(cls, key: str, exclude_id: Optional[int] = None) -> List[Tuple[int, str]]:
+    def choices(cls, key: str, exclude_id: int | None = None) -> list[tuple[int, str]]:
         """Варианты для поля-ссылки. exclude_id не даёт показателю стать себе родителем."""
         kind = KINDS[key]
         label_attr = "name" if key != "indicator" else None
@@ -352,7 +353,7 @@ class ReferenceService:
     # --- вспомогательное ---
 
     @classmethod
-    def _ref_labels(cls, session) -> Dict[str, Dict[int, str]]:
+    def _ref_labels(cls, session) -> dict[str, dict[int, str]]:
         """Подписи для колонок-ссылок: показывать id пользователю бессмысленно.
 
         Ключ — справочник, а не колонка: `parent_id` есть у двух справочников
@@ -374,7 +375,7 @@ class ReferenceService:
         }
 
     @staticmethod
-    def _display(column: Column, value, labels: Dict[str, Dict[int, str]]):
+    def _display(column: Column, value, labels: dict[str, dict[int, str]]):
         if value is None:
             return ""
         mapping = labels.get(column.ref) if column.ref else None
@@ -394,7 +395,7 @@ class ReferenceService:
         return out
 
     @staticmethod
-    def _validate(kind: Kind, values: dict) -> Optional[str]:
+    def _validate(kind: Kind, values: dict) -> str | None:
         for field in kind.fields:
             value = values.get(field.name)
             if field.kind == "ref":

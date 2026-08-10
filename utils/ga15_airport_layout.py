@@ -9,7 +9,7 @@
 Если импорт записывает другие коды — добавьте их в GA15_CODE_ALIASES в data_controller.
 """
 
-from typing import List, Tuple, Optional, Any
+from typing import Any
 
 # Ключи метрик (суффикс кода показателя после второго дефиса)
 GA15_METRIC_TAGS = (
@@ -27,7 +27,7 @@ GA15_METRIC_TAGS = (
 )
 
 # Нижний ряд заголовков (под группами)
-GA15_FLAT_HEADERS: List[str] = [
+GA15_FLAT_HEADERS: list[str] = [
     "Виды перевозок",
     "№ строки",
     "ВС, ед.",
@@ -44,7 +44,7 @@ GA15_FLAT_HEADERS: List[str] = [
 ]
 
 # Группы верхнего уровня для MultiLevelHeaderView: (first_col, last_col, label)
-GA15_HEADER_GROUPS: List[Tuple[int, int, str]] = [
+GA15_HEADER_GROUPS: list[tuple[int, int, str]] = [
     (2, 2, "Количество отбывших-прибывших ВС - всего, ед."),
     (3, 6, "Пассажиры, чел."),
     (7, 9, "Груз, т"),
@@ -52,7 +52,7 @@ GA15_HEADER_GROUPS: List[Tuple[int, int, str]] = [
 ]
 
 # Ключи колонок данных в pivot-словаре (13 столбцов)
-GA15_KEYS: List[str] = [f"ga15_{i}" for i in range(13)]
+GA15_KEYS: list[str] = [f"ga15_{i}" for i in range(13)]
 
 
 # В бланке 15-ГА в неприменимых графах напечатана «Х» — кириллическая, как в
@@ -74,9 +74,9 @@ class Ga15RowSpec:
         self,
         kind: str,
         title: str,
-        line_display: Optional[Any] = None,
-        row_code: Optional[str] = None,
-        not_filled: Tuple[str, ...] = (),
+        line_display: Any | None = None,
+        row_code: str | None = None,
+        not_filled: tuple[str, ...] = (),
     ):
         """
         kind: section | subheading | subdetail | data | filler | footer
@@ -91,7 +91,7 @@ class Ga15RowSpec:
 
 
 # Строки листа «15-ГА» (без служебных блоков подписей внизу)
-GA15_TABLE_ROWS: List[Ga15RowSpec] = [
+GA15_TABLE_ROWS: list[Ga15RowSpec] = [
     Ga15RowSpec("title", 'Наименование аэропорта: {airport_name}', None, None),
     Ga15RowSpec("spacer", "", None, None),
     Ga15RowSpec("spacer", "", None, None),

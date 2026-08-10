@@ -1,4 +1,4 @@
-from typing import Any, List
+from typing import Any
 from controllers.report_filters import ReportFilters
 from controllers.period_filter import apply_period_filter
 from db.models.entities import AirlineIndicators, Shipping, Airline, Indicator, Route
@@ -9,7 +9,7 @@ from sqlalchemy.orm import joinedload
 class AirlineIndController:
 
     @classmethod
-    def get_all_indicators(cls, session) -> List[AirlineIndicators]:
+    def get_all_indicators(cls, session) -> list[AirlineIndicators]:
         query = select(AirlineIndicators).options(
             joinedload(AirlineIndicators.indicator),
             joinedload(AirlineIndicators.shipping).joinedload(Shipping.airline),
@@ -20,7 +20,7 @@ class AirlineIndController:
 
 
     @classmethod
-    def aggregate(cls, session, filters: ReportFilters) -> List[Any]:
+    def aggregate(cls, session, filters: ReportFilters) -> list[Any]:
         """Ячейки свода одним запросом: суммы по группам (PERF-2).
 
         Гранула — самая мелкая из нужных построителям: раздел бланка, показатель,
@@ -81,7 +81,7 @@ class AirlineIndController:
         return session.execute(query).all()
 
     @classmethod
-    def filter_indicators(cls, session, filters: ReportFilters) -> List[AirlineIndicators]:
+    def filter_indicators(cls, session, filters: ReportFilters) -> list[AirlineIndicators]:
         """Фильтрация показателей авиакомпаний с поддержкой диапазона периода."""
         query = select(AirlineIndicators).options(
             joinedload(AirlineIndicators.indicator),

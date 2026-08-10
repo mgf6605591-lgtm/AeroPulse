@@ -21,7 +21,7 @@
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional, Sequence
+from collections.abc import Sequence
 
 from db.backup import make_backup
 from db.database import db_path, get_session
@@ -58,12 +58,12 @@ class DeletionResult:
     """
 
     deleted: int
-    backup: Optional[Path]
+    backup: Path | None
 
 
 def delete_indicators(
     entity_type: str, ids: Sequence[int], *,
-    user: Optional[str] = None, require_backup: bool = True
+    user: str | None = None, require_backup: bool = True
 ) -> DeletionResult:
     """Удаляет строки отчётности, сняв перед этим копию базы и записав журнал.
 
@@ -102,7 +102,7 @@ def delete_indicators(
     return DeletionResult(deleted=deleted, backup=backup_path)
 
 
-def _make_backup(require_backup: bool) -> Optional[Path]:
+def _make_backup(require_backup: bool) -> Path | None:
     """Копия базы перед удалением.
 
     None означает «копировать было нечего»: файла базы нет — `make_backup`

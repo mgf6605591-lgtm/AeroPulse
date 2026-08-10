@@ -19,7 +19,8 @@ Create Date: 2026-08-06 20:24:11.038217
 
 """
 import logging
-from typing import Sequence, Union
+from typing import Union
+from collections.abc import Sequence
 
 from alembic import op
 import sqlalchemy as sa
@@ -27,9 +28,9 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = '1d93677c2cb4'
-down_revision: Union[str, Sequence[str], None] = '9d180a1255ac'
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | Sequence[str] | None = '9d180a1255ac'
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 _MONTHS = sa.Enum(

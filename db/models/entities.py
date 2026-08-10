@@ -1,5 +1,5 @@
 from decimal import Decimal
-from typing import List, Optional
+from typing import Optional
 
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String
@@ -68,7 +68,7 @@ class Airport(Base):
     # ведёт себя как аэропорт во всём остальном. SET NULL, а не RESTRICT: потеря
     # группировки не должна мешать убрать ошибочно заведённую запись, а сама
     # отчётность к ней не привязана.
-    parent_id: Mapped[Optional[int]] = mapped_column(
+    parent_id: Mapped[int | None] = mapped_column(
         ForeignKey('airports.id', ondelete='SET NULL'), nullable=True
     )
     parent: Mapped[Optional["Airport"]] = relationship(
@@ -76,7 +76,7 @@ class Airport(Base):
         remote_side="Airport.id",
         back_populates="children",
     )
-    children: Mapped[List["Airport"]] = relationship(
+    children: Mapped[list["Airport"]] = relationship(
         "Airport",
         back_populates="parent",
     )
@@ -84,7 +84,7 @@ class Airport(Base):
     # Без каскада: аэропорт с отчётностью удалить нельзя, это запрещает БД
     # (ondelete='RESTRICT'). Удаление одной строки справочника не должно уносить
     # накопленные за годы отчёты — для этого есть is_active.
-    indicators: Mapped[List["AirportIndicators"]] = relationship("AirportIndicators", back_populates="airport", passive_deletes="all")
+    indicators: Mapped[list["AirportIndicators"]] = relationship("AirportIndicators", back_populates="airport", passive_deletes="all")
 
 class Locality(Base):
     __tablename__ = 'airport_localities'
@@ -121,7 +121,7 @@ class Shipping(Base):
     airline_id: Mapped[int] = mapped_column(ForeignKey('airlines.id', ondelete='RESTRICT'))
     airline: Mapped["Airline"] = relationship("Airline", back_populates="shippings")
 
-    indicators: Mapped[List["AirlineIndicators"]] = relationship("AirlineIndicators", back_populates="shipping", cascade="all, delete-orphan", passive_deletes=True)
+    indicators: Mapped[list["AirlineIndicators"]] = relationship("AirlineIndicators", back_populates="shipping", cascade="all, delete-orphan", passive_deletes=True)
 
 class Route(Base):
     __tablename__ = 'routes'
@@ -158,13 +158,13 @@ class Indicator(Base):
     code: Mapped[str] = mapped_column(String(CODE_LENGTH), unique=True)
     measure: Mapped[str] = mapped_column(String(20))
     # Детализация показателя (напр. 450пас → родитель 450 «Выполненный тоннокилометраж»)
-    parent_id: Mapped[Optional[int]] = mapped_column(ForeignKey('indicators.id', ondelete='SET NULL'), nullable=True)
+    parent_id: Mapped[int | None] = mapped_column(ForeignKey('indicators.id', ondelete='SET NULL'), nullable=True)
     parent: Mapped[Optional["Indicator"]] = relationship(
         "Indicator",
         remote_side="Indicator.id",
         back_populates="children",
     )
-    children: Mapped[List["Indicator"]] = relationship(
+    children: Mapped[list["Indicator"]] = relationship(
         "Indicator",
         back_populates="parent",
     )
@@ -205,19 +205,19 @@ class ImportLog(Base):
     # 'import' — загрузка файла, 'delete' — удаление записей пользователем,
     # 'replace' — строки периода, исчезнувшие из исправленного отчёта (DATA-5).
     kind: Mapped[str] = mapped_column(String(20))
-    user: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    user: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
-    source_file: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    entity_type: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
-    entity_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    source_file: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    entity_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    entity_id: Mapped[int | None] = mapped_column(Integer, nullable=True)
     # Та же длина, что у самого названия: журнал хранит копию, и обрезать её
     # он не должен — иначе запись о загрузке рассказывает про другое предприятие.
-    entity_name: Mapped[Optional[str]] = mapped_column(String(NAME_LENGTH), nullable=True)
+    entity_name: Mapped[str | None] = mapped_column(String(NAME_LENGTH), nullable=True)
 
-    month: Mapped[Optional[Months]] = mapped_column(MonthNumber, nullable=True)
-    year: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    month: Mapped[Months | None] = mapped_column(MonthNumber, nullable=True)
+    year: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
     imported: Mapped[int] = mapped_column(Integer, default=0)
     updated: Mapped[int] = mapped_column(Integer, default=0)
     removed: Mapped[int] = mapped_column(Integer, default=0)
-    message: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    message: Mapped[str | None] = mapped_column(String(500), nullable=True)

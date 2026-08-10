@@ -13,7 +13,7 @@
 Код здесь служебный. Настоящий проставляется в «Справочниках» — это правка
 одного поля, а не перезаведение записи с отчётностью.
 """
-from typing import Container, Optional
+from collections.abc import Container
 
 # Длина колонки `code` в справочниках предприятий.
 CODE_LENGTH = 5
@@ -41,7 +41,7 @@ def transliterate(name: str) -> str:
     return "".join(out)
 
 
-def unique_entity_code(name: str, taken: Container[str], preferred: Optional[str] = None) -> str:
+def unique_entity_code(name: str, taken: Container[str], preferred: str | None = None) -> str:
     """Код длиной не больше пяти символов, которого ещё нет в `taken`.
 
     `preferred` — код, названный самим отчётом. Он берётся первым, но только если
