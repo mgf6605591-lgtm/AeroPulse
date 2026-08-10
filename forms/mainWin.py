@@ -19,7 +19,7 @@ from PyQt6.QtWidgets import (
 )
 from db.backup import make_backup
 from db.database import db_path
-from services.deletion_service import delete_indicators
+from services.deletion_service import BackupUnavailable, delete_indicators
 from services.import_service import ImportService
 from controllers.filter_controller import FilterController
 from forms.widgets.filter_widget import FilterWidget
@@ -320,22 +320,47 @@ class MainWindow(QMainWindow):
         if reply != QMessageBox.StandardButton.Yes:
             return
 
-        try:
-            result = delete_indicators(
-                self._entity_type(),
-                ids_to_delete,
-                user=getattr(self.current_user, "username", None),
-            )
-        except Exception as e:
-            log.exception("Не удалось удалить записи")
-            QMessageBox.critical(self, "Ошибка", f"Ошибка удаления: {e}")
+        result = self._delete(ids_to_delete, require_backup=True)
+        if result is None:
             return
 
-        note = f"\nКопия базы: {result.backup.name}" if result.backup else ""
+        note = (f"\nКопия базы: {result.backup.name}" if result.backup
+                else "\nКопия базы не снята.")
         QMessageBox.information(self, "Готово", f"Удалено записей: {result.deleted}{note}")
-        # Перечитывание за пределами `try`: удаление уже состоялось, и назвать
-        # его неудачей из-за сбоя перерисовки значило бы соврать.
+        # Перечитывание за пределами обработки ошибок: удаление уже состоялось, и
+        # назвать его неудачей из-за сбоя перерисовки значило бы соврать.
         self._load_initial_data()
+
+    def _delete(self, ids: list, *, require_backup: bool):
+        """Удаление через службу. None — не состоялось, причина уже показана."""
+        try:
+            return delete_indicators(
+                self._entity_type(),
+                ids,
+                user=getattr(self.current_user, "username", None),
+                require_backup=require_backup,
+            )
+        except BackupUnavailable as error:
+            # Копия снимается до удаления, поэтому сейчас ещё ничего не потеряно
+            # и решение принадлежит человеку, а не журналу приложения (FUNC-13).
+            if not self._agrees_to_delete_without_backup(error):
+                return None
+            return self._delete(ids, require_backup=False)
+        except Exception as error:
+            log.exception("Не удалось удалить записи")
+            QMessageBox.critical(self, "Ошибка", f"Ошибка удаления: {error}")
+            return None
+
+    def _agrees_to_delete_without_backup(self, error: Exception) -> bool:
+        """Вопрос вместо молчания. По умолчанию — «нет»: отменить удаление нечем."""
+        return QMessageBox.question(
+            self, "Копию базы снять не удалось",
+            f"Не удалось снять копию базы:\n{error}\n\n"
+            "Если удалить сейчас, восстановить записи будет нечем.\n"
+            "Удалить всё равно?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        ) == QMessageBox.StandardButton.Yes
 
     def logout_action(self):
         """Выход из системы: вернуться к окну входа, не закрывая программу."""

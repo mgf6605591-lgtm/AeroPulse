@@ -38,14 +38,23 @@ _MODEL_BY_ENTITY = {
 }
 
 
+class BackupUnavailable(RuntimeError):
+    """Копию базы снять не удалось, а удаление её не дождалось (FUNC-13).
+
+    Отдельное исключение, а не общий отказ: оно означает не «удалить не вышло»,
+    а «удалить пока не пробовали». Копия снимается **до** удаления, поэтому в
+    этот момент ещё ничего не потеряно и решение можно оставить пользователю —
+    для этого у `delete_indicators` есть `require_backup=False`.
+    """
+
+
 @dataclass(frozen=True)
 class DeletionResult:
     """Что произошло: сколько строк удалено и куда легла копия базы.
 
-    `backup` — None, когда копию снять не удалось. Это не отменяет удаления:
-    так было и до выноса в службу, и менять решение здесь, заодно с переносом,
-    незачем. Но отличить один случай от другого вызывающий обязан, поэтому
-    результат об этом рассказывает, а не умалчивает.
+    `backup` — None, когда копировать было нечего: файла базы нет, а значит нет
+    и того, что копия защищала бы. Неудача копирования сюда не попадает — она
+    поднимается `BackupUnavailable` и требует явного решения.
     """
 
     deleted: int
@@ -53,18 +62,25 @@ class DeletionResult:
 
 
 def delete_indicators(
-    entity_type: str, ids: Sequence[int], *, user: Optional[str] = None
+    entity_type: str, ids: Sequence[int], *,
+    user: Optional[str] = None, require_backup: bool = True
 ) -> DeletionResult:
     """Удаляет строки отчётности, сняв перед этим копию базы и записав журнал.
 
     Отсутствующий id пропускается молча: строку могли удалить в другом окне,
     и падать на этом незачем — в результат попадёт число реально удалённых.
+
+    Копия обязательна: не снялась — `BackupUnavailable`, и в базе ничего не
+    менялось. `require_backup=False` снимает это требование, но только явно и
+    только от того, кто спросил у человека. Прежде неудача копирования просто
+    писалась в журнал приложения, а удаление шло дальше — и «Готово» выглядело
+    так же, как с копией (FUNC-13).
     """
     model = _MODEL_BY_ENTITY.get(entity_type)
     if model is None:
         raise ValueError(f"Неизвестный вид отчётности: {entity_type!r}")
 
-    backup_path = _make_backup()
+    backup_path = _make_backup(require_backup)
 
     deleted = 0
     with get_session() as session:
@@ -86,10 +102,18 @@ def delete_indicators(
     return DeletionResult(deleted=deleted, backup=backup_path)
 
 
-def _make_backup() -> Optional[Path]:
-    """Копия базы перед удалением. Неудача не срывает операцию, но и не теряется."""
+def _make_backup(require_backup: bool) -> Optional[Path]:
+    """Копия базы перед удалением.
+
+    None означает «копировать было нечего»: файла базы нет — `make_backup`
+    сообщает об этом возвратом, а не исключением, и удалять там тоже нечего.
+    Настоящая неудача — исключение, и она либо останавливает удаление, либо
+    прощена вызывающим; в журнал приложения она попадает в обоих случаях.
+    """
     try:
         return make_backup(db_path(), reason="delete")
-    except Exception:
+    except Exception as error:
         log.exception("Не удалось снять копию базы")
+        if require_backup:
+            raise BackupUnavailable(str(error)) from error
         return None
