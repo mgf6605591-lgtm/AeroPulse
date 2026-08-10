@@ -1,4 +1,4 @@
-"""Слой `controllers/` не знает про интерфейс (ARCH-2).
+"""Слой `controllers/` не знает ни про интерфейс (ARCH-2), ни про `services/` (ARCH-14).
 
 Экспортёр сам обходил `QTableView` и сам показывал `QMessageBox`: слой, который
 по замыслу интерфейса не касается, был кодом интерфейса. Позвать его из теста
@@ -8,6 +8,13 @@
 
 Сборка книги теперь принимает готовые заголовки и строки значений и об ошибке
 сообщает исключением. Чтение модели и окна сообщений — в `forms/table_export.py`.
+
+Второй запрет — на `services/`. Пакеты были замкнуты в кольцо: `data_controller`
+звал `services.airline_ind_service`, а тот звал `controllers.AirlineIndController`.
+На уровне модулей это разрешалось порядком импорта, поэтому не мешало ничему и не
+падало никогда — но уровни из двух пакетов не строились, и правило «`controllers/`
+ниже `services/`» нельзя было ни записать, ни проверить. Обёртки над репозиториями
+переехали в `controllers/`, и теперь пакеты не знают друг о друге вовсе.
 
 Проверяется так же, как граница пакета данных в ARCH-3: запретом импорта в
 отдельном процессе, а не разглядыванием кода.
@@ -31,53 +38,64 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 # Запрет ставится подменой в sys.modules: `import PyQt6` падает и в том случае,
 # если пакет установлен, — а он установлен, иначе половина прогона пропускалась бы.
-_IMPORT_CONTROLLERS_WITHOUT_QT = """
+#
+# Модули пакета не перечисляются руками, а обходятся `pkgutil`: список, набранный
+# вручную, отстаёт от пакета молча, и новый модуль оказался бы вне проверки — то
+# есть ровно тот модуль, который её и завалил бы.
+_IMPORT_CONTROLLERS_ALONE = """
+import importlib
+import pkgutil
 import sys
-sys.modules['PyQt6'] = None
-try:
-    import PyQt6  # noqa: F401
-except ImportError:
-    pass
-else:
-    raise AssertionError('запрет на PyQt6 не сработал — проверка ничего не значит')
 
-import controllers.AirlineIndController   # noqa: F401
-import controllers.AirportIndController   # noqa: F401
-import controllers.UserController         # noqa: F401
-import controllers.data_controller        # noqa: F401
-import controllers.export_controller      # noqa: F401
-import controllers.export_header          # noqa: F401
-import controllers.filter_controller      # noqa: F401
-import controllers.period_filter          # noqa: F401
-import controllers.reference_cache        # noqa: F401
-import controllers.report_filters         # noqa: F401
+for forbidden in ('PyQt6', 'services'):
+    sys.modules[forbidden] = None
+    try:
+        importlib.import_module(forbidden)
+    except ImportError:
+        pass
+    else:
+        raise AssertionError(
+            'запрет на %s не сработал — проверка ничего не значит' % forbidden
+        )
+
+import controllers
+
+modules = list(pkgutil.iter_modules(controllers.__path__))
+if not modules:
+    raise AssertionError('в пакете не нашлось ни одного модуля — обход пустой')
+
+for info in modules:
+    importlib.import_module('controllers.%s' % info.name)
 """
 
 
 class ControllersNeedNoGuiTest(unittest.TestCase):
-    def test_layer_imports_without_pyqt(self):
+    def test_layer_imports_without_pyqt_or_services(self):
+        """Весь пакет поднимается в процессе, где нет ни PyQt6, ни `services/`."""
         result = subprocess.run(
-            [sys.executable, "-c", _IMPORT_CONTROLLERS_WITHOUT_QT],
+            [sys.executable, "-c", _IMPORT_CONTROLLERS_ALONE],
             cwd=PROJECT_ROOT, capture_output=True, text=True,
             env={**os.environ, "PYTHONPATH": str(PROJECT_ROOT)},
         )
         self.assertEqual(0, result.returncode, result.stderr)
 
+    def _importers_of(self, package: str):
+        return [
+            path.name for path in (PROJECT_ROOT / "controllers").glob("*.py")
+            if re.search(rf"^\s*(import|from)\s+{package}", path.read_text(encoding="utf-8"), re.M)
+        ]
+
     def test_no_source_in_the_layer_mentions_pyqt(self):
         """Проверка на будущее: следующий диалог не должен приехать обратно."""
-        offenders = [
-            path.name for path in (PROJECT_ROOT / "controllers").glob("*.py")
-            if re.search(r"^\s*(import|from)\s+PyQt6", path.read_text(encoding="utf-8"), re.M)
-        ]
-        self.assertEqual([], offenders)
+        self.assertEqual([], self._importers_of("PyQt6"))
 
     def test_layer_does_not_reach_into_forms(self):
         """Обратная зависимость ушла вместе с чтением модели: роль RAW_VALUE_ROLE — там же, где модели."""
-        offenders = [
-            path.name for path in (PROJECT_ROOT / "controllers").glob("*.py")
-            if re.search(r"^\s*(import|from)\s+forms", path.read_text(encoding="utf-8"), re.M)
-        ]
-        self.assertEqual([], offenders)
+        self.assertEqual([], self._importers_of("forms"))
+
+    def test_layer_does_not_reach_into_services(self):
+        """Кольцо ARCH-14: `controllers/` не зовёт `services/` ни одним модулем."""
+        self.assertEqual([], self._importers_of("services"))
 
 
 class WorkbookIsWrittenWithoutQtTest(unittest.TestCase):
