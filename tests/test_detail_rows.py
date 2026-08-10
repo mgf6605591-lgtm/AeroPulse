@@ -20,9 +20,9 @@ from db.models.entities import (
     Airline, AirlineIndicators, Airport, AirportIndicators, Indicator, Locality, Route, Shipping
 )
 from db.models.enums import Months, RouteType, ShippingRegularity
-from services.airline_ind_service import AirlineIndicatorService
-from services.airport_ind_service import AirportIndicatorService
-from services.detail_rows import DetailRow
+from controllers.airline_ind_service import AirlineIndicatorService
+from controllers.airport_ind_service import AirportIndicatorService
+from controllers.detail_rows import DetailRow
 from controllers.report_filters import ReportFilters
 from tests.support import MigratedDbCase
 
@@ -51,10 +51,10 @@ class DetailRowsCase(MigratedDbCase):
             ))
             session.commit()
 
-        patcher = patch("services.airline_ind_service.get_session", self.Session)
+        patcher = patch("controllers.airline_ind_service.get_session", self.Session)
         patcher.start()
         self.addCleanup(patcher.stop)
-        airport_patcher = patch("services.airport_ind_service.get_session", self.Session)
+        airport_patcher = patch("controllers.airport_ind_service.get_session", self.Session)
         airport_patcher.start()
         self.addCleanup(airport_patcher.stop)
 

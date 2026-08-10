@@ -6,8 +6,8 @@ from typing import Dict, List, Any, Optional, Sequence, Set
 from db.database import get_session
 from db.models.entities import Airline, Airport, Indicator
 from db.models.enums import RouteType, ShippingRegularity
-from services.airline_ind_service import AirlineIndicatorService
-from services.airport_ind_service import AirportIndicatorService
+from controllers.airline_ind_service import AirlineIndicatorService
+from controllers.airport_ind_service import AirportIndicatorService
 from utils.constants import (
     MONTHS_LIST,
     MONTHS_RU,
@@ -1263,7 +1263,7 @@ class DataController:
                 "ID", "Авиакомпания", "Код а/к", "Показатель", "Месяц", "Год",
                 "Значение", "Ед. изм.", "Тип маршрута", "Регулярность",
             ]
-            # Поля снимка строки (services/detail_rows.py), а не пути по связям
+            # Поля снимка строки (controllers/detail_rows.py), а не пути по связям
             # ORM: за пределами сессии связей уже нет, и путь вроде
             # 'shipping.airline.name' держался на точно подобранных joinedload
             # (BUG-14).

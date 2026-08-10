@@ -55,7 +55,7 @@ class DetailColumnsTest(unittest.TestCase):
 
     def rows(self):
         """Снимки строк — то, что теперь отдаёт служба (BUG-14)."""
-        from services.detail_rows import DetailRow
+        from controllers.detail_rows import DetailRow
 
         return [
             DetailRow(id=1, entity_name="Тестовая АК", entity_code="AAA",
@@ -105,7 +105,7 @@ class DetailRowsAreDistinguishableTest(unittest.TestCase):
         from controllers.data_controller import DataController
         from forms.models.sqlalchemy_table_model import SQLAlchemyTableModel
 
-        from services.detail_rows import DetailRow
+        from controllers.detail_rows import DetailRow
 
         rows = [
             DetailRow(id=1, entity_name="АК", entity_code="AAA", indicator="Самолето-километры",

@@ -1,4 +1,4 @@
-# services/airline_ind_service.py
+# controllers/airline_ind_service.py
 """Отчётность авиакомпаний: граница сессии и форма выдачи (ARCH-1, BUG-14).
 
 До сих пор служба состояла из методов, каждый из которых открывал сессию и тут же
@@ -6,13 +6,19 @@
 собственного смысла. Смысл у неё теперь один и понятный: **сессия не переживает
 вызов, и ORM-объекты за её пределы не выходят**. Наружу уходят либо суммы для
 свода, либо снимки строк для таблицы.
+
+Лежит рядом с репозиторием, а не в `services/`, потому что только его и
+обёртывает: сессия открывается вокруг вызова `AirlineIndController` и закрывается
+на выходе. Пока модуль жил в `services/`, пакеты были замкнуты в кольцо —
+`controllers.data_controller` звал его, а он звал `controllers.AirlineIndController`,
+— и уровни из этих двух пакетов не строились (ARCH-14).
 """
 from typing import Any, List
 
 from controllers.AirlineIndController import AirlineIndController
+from controllers.detail_rows import DetailRow, from_airline_indicator
 from controllers.report_filters import NO_FILTERS, ReportFilters
 from db.database import get_session
-from services.detail_rows import DetailRow, from_airline_indicator
 
 
 class AirlineIndicatorService:

@@ -1,16 +1,19 @@
-# services/airport_ind_service.py
+# controllers/airport_ind_service.py
 """Отчётность аэропортов: граница сессии и форма выдачи (ARCH-1, BUG-14).
 
 То же, что и у авиакомпаний: служба отвечает за то, чтобы сессия не переживала
 вызов, а наружу уходили суммы для свода или снимки строк для таблицы — но не
 объекты ORM, у которых за пределами сессии не осталось связей.
+
+О том, почему модуль лежит здесь, а не в `services/`, — см.
+[controllers/airline_ind_service.py](controllers/airline_ind_service.py) (ARCH-14).
 """
 from typing import Any, List
 
 from controllers.AirportIndController import AirportIndController
+from controllers.detail_rows import DetailRow, from_airport_indicator
 from controllers.report_filters import NO_FILTERS, ReportFilters
 from db.database import get_session
-from services.detail_rows import DetailRow, from_airport_indicator
 
 
 class AirportIndicatorService:
