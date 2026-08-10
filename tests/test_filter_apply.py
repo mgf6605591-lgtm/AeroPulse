@@ -11,6 +11,11 @@
 
 Считаются именно сигналы и вызовы перезагрузки — то, сколько раз приложение
 возьмётся строить отчёт.
+
+Годы периода задаёт фикстура: списки складываются по данным (ARCH-11), и на
+рабочей базе разработчика годов из проверки могло не оказаться вовсе. Проверки
+при этом оставались зелёными — `_set_combo_value` на отсутствующем годе молча
+ничего не делает, — то есть проверяли меньше написанного.
 """
 
 import os
@@ -18,6 +23,7 @@ import unittest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from tests.support import FilterWidgetCase
 from utils.constants import APPLY_CAPTION, APPLY_CAPTION_PENDING
 
 try:
@@ -46,6 +52,7 @@ class PeriodAppliesByButton:
         raise NotImplementedError
 
     def setUp(self):
+        super().setUp()
         self.widget = self.make_widget()
         self.addCleanup(self.widget.deleteLater)
         self.rebuilds = []
@@ -53,10 +60,15 @@ class PeriodAppliesByButton:
 
     def change_period(self):
         """Диапазон «с марта 2024 по июнь 2025» — четыре движения."""
-        self.widget._set_combo_value(self.widget.from_month, "March")
-        self.widget._set_combo_value(self.widget.from_year, 2024)
-        self.widget._set_combo_value(self.widget.to_month, "June")
-        self.widget._set_combo_value(self.widget.to_year, 2025)
+        for combo, value in (
+            (self.widget.from_month, "March"), (self.widget.from_year, 2024),
+            (self.widget.to_month, "June"), (self.widget.to_year, 2025),
+        ):
+            self.widget._set_combo_value(combo, value)
+            # Значения нет в списке — движения не было. Без этой проверки набор
+            # считал бы не четыре изменения периода, а сколько получится, и
+            # оставался бы зелёным.
+            self.assertEqual(value, combo.currentData())
 
     def test_changing_the_period_does_not_rebuild(self):
         self.change_period()
@@ -91,7 +103,7 @@ class PeriodAppliesByButton:
 
 
 @unittest.skipUnless(HAS_QT, "PyQt6 не установлен")
-class AirlineFilterApplyTest(PeriodAppliesByButton, unittest.TestCase):
+class AirlineFilterApplyTest(PeriodAppliesByButton, FilterWidgetCase):
     def make_widget(self):
         from forms.widgets.filter_widget import FilterWidget
 
@@ -105,7 +117,7 @@ class AirlineFilterApplyTest(PeriodAppliesByButton, unittest.TestCase):
 
 
 @unittest.skipUnless(HAS_QT, "PyQt6 не установлен")
-class AirportFilterApplyTest(PeriodAppliesByButton, unittest.TestCase):
+class AirportFilterApplyTest(PeriodAppliesByButton, FilterWidgetCase):
     def make_widget(self):
         from forms.widgets.airport_filter_widget import AirportFilterWidget
 

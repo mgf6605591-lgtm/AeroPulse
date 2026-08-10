@@ -20,6 +20,7 @@ from unittest.mock import patch
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from controllers.filter_controller import period_from_widget, period_is_inverted
+from tests.support import FilterWidgetCase
 from utils.constants import MODE_AIRLINE, MODE_AIRPORT
 
 try:
@@ -100,11 +101,14 @@ class PeriodOrderTest(unittest.TestCase):
 
 
 @unittest.skipUnless(HAS_QT, "PyQt6 не установлен")
-class ApplyRefusesAnInvertedPeriodTest(unittest.TestCase):
+class ApplyRefusesAnInvertedPeriodTest(FilterWidgetCase):
     """Поведение по кнопке «Применить»: сказать и не строить.
 
     Границы намеренно не переставляются местами: перестановка выглядит услугой,
     но даёт отчёт за двадцать четыре месяца, которого никто не просил.
+
+    Годы 2024 и 2025 приходят из фикстуры: на рабочей базе разработчика набор
+    годов какой угодно, и «с декабря 2025 по январь 2024» было не выбрать.
     """
 
     def make_widget(self, cls_name):

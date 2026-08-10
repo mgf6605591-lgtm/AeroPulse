@@ -19,6 +19,7 @@ from datetime import date
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from db.models.enums import Months
+from tests.support import FilterWidgetCase
 from utils.months import (
     MONTH_NAMES,
     month_from_period,
@@ -154,8 +155,13 @@ class YearChoicesFollowTheDataTest(unittest.TestCase):
 
 
 @unittest.skipUnless(HAS_QT, "PyQt6 не установлен")
-class BothTabsShareThePeriodBlockTest(unittest.TestCase):
-    """ARCH-8: заполнение, умолчание и чтение периода были списаны в оба виджета."""
+class BothTabsShareThePeriodBlockTest(FilterWidgetCase):
+    """ARCH-8: заполнение, умолчание и чтение периода были списаны в оба виджета.
+
+    Виджеты собираются на временной базе: сами проверки от её содержимого не
+    зависят, но настоящие виджеты открывали рабочую db/database.db и наполняли
+    общий кеш справочников боевыми записями на весь оставшийся прогон.
+    """
 
     def widgets(self):
         from forms.widgets.airport_filter_widget import AirportFilterWidget

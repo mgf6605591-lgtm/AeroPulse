@@ -101,6 +101,22 @@ def seed_reference_data(engine) -> None:
         ))
 
 
+def seed_reporting_years(engine, years=(2024, 2025)) -> None:
+    """По одной строке отчётности авиакомпании на каждый из годов.
+
+    Опирается на справочники из `seed_reference_data`: строка ссылается на рейс 1
+    и показатель 1. Сами значения роли не играют — строки заводятся ради годов, по
+    которым складывается диапазон периода.
+    """
+    with engine.begin() as conn:
+        for number, year in enumerate(years, start=1):
+            conn.execute(
+                text("INSERT INTO airlineInd (id, indicator_id, shipping_id, month, year, value)"
+                     " VALUES (:id, 1, 1, 1, :year, '1')"),
+                {"id": number, "year": year},
+            )
+
+
 def table_ddl(engine, name: str):
     with engine.connect() as conn:
         return conn.execute(
@@ -322,6 +338,37 @@ class MigratedDbCase(TempDbCase):
     def setUp(self) -> None:
         super().setUp()
         upgrade_to_head(self.engine)
+
+
+class FilterWidgetCase(MigratedDbCase):
+    """Виджет фильтров на своей базе: годы задаёт фикстура, а не машина.
+
+    Списки годов в фильтрах складываются по данным (ARCH-11): `get_period_range()`
+    берёт минимальный и максимальный год отчётности из базы. Виджет, собранный без
+    своей базы, читал рабочую db/database.db разработчика — и тест, выбирающий
+    2024 год, проходил или падал в зависимости от того, что в неё успели загрузить.
+    Здесь годы отчётности известны заранее: FILTER_YEARS.
+
+    `year_choices` добавляет к ним текущий год и заполняет промежуток, поэтому
+    список в комбобоксе шире FILTER_YEARS — но сами эти годы в нём есть всегда,
+    какой бы сегодня ни был день.
+    """
+
+    FILTER_YEARS = (2024, 2025)
+
+    def setUp(self) -> None:
+        super().setUp()
+        seed_reference_data(self.engine)
+        seed_reporting_years(self.engine, self.FILTER_YEARS)
+        # Контроллер фильтров ходит в базу и за списками справочников, и за
+        # диапазоном годов — сессия подменяется ему одному, больше виджету фильтров
+        # база ниоткуда не нужна.
+        session_patch = patch(
+            "controllers.filter_controller.get_session",
+            sessionmaker(bind=self.engine, expire_on_commit=False),
+        )
+        session_patch.start()
+        self.addCleanup(session_patch.stop)
 
 # Заглушки записей отчётности для построителей свода. Построителям нужны только
 # атрибуты показателя, рейса и периода; поднимать ради этого полный граф связей
