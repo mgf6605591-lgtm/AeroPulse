@@ -4,6 +4,20 @@ version = "0.1.0"
 description = "Учёт статистической отчётности гражданской авиации: формы 12-ГА и 15-ГА"
 requires-python = ">=3.12"
 
+[tool.coverage.run]
+# Считается код приложения: покрытие самих тестов ни о чём не говорит.
+#
+# `main.py` в списке не стоит намеренно. Путь к файлу, а не имя пакета, coverage
+# пытается импортировать сам — и точка входа, поднимающая Qt, тянет за собой
+# numpy второй раз в том же процессе. numpy этого не прощает («cannot load module
+# more than once per process»), и падает не отчёт, а четырнадцать тестов подряд.
+branch = true
+source = ["controllers", "db", "forms", "importers", "parsers", "services", "utils"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+
 [tool.ruff]
 # Тот же набор файлов, что и в прогоне тестов; .venv и сборочные каталоги — мимо.
 extend-exclude = [".venv", "build", "dist"]
