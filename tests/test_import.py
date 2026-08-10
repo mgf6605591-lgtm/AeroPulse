@@ -101,7 +101,7 @@ class DetailIndicatorLinkTest(ImportCase):
         """Детализация без родителя не должна ронять импорт."""
         result = self.do_import([indicator_row("450пас", "      а) пассажирский", "1.5")])
 
-        self.assertTrue(result["success"], result["message"])
+        self.assertTrue(result.success, result.message)
         self.assertIsNone(self.indicators_by_code()["450пас"].parent_id)
 
 
@@ -111,8 +111,8 @@ class ReimportTest(ImportCase):
 
         result = self.do_import(DETAIL_BEFORE_PARENT)
 
-        self.assertEqual(0, result["imported"])
-        self.assertEqual(len(DETAIL_BEFORE_PARENT), result["updated"])
+        self.assertEqual(0, result.imported)
+        self.assertEqual(len(DETAIL_BEFORE_PARENT), result.updated)
         with self.Session() as session:
             self.assertEqual(len(DETAIL_BEFORE_PARENT), session.query(AirlineIndicators).count())
 
@@ -154,7 +154,7 @@ class IndicatorCodeTest(ImportCase):
         """Второй 'UNK' ронял импорт файла: код показателя уникален."""
         result = self.do_import([self.nameless("965", "100"), self.nameless("642", "200")])
 
-        self.assertTrue(result["success"], result["message"])
+        self.assertTrue(result.success, result.message)
         by_code = self.indicators_by_code()
         self.assertIn("965", by_code)
         self.assertIn("642", by_code)
@@ -280,7 +280,7 @@ class DuplicateRowsTest(ImportCase):
 
         result = self.do_import(rows)
 
-        self.assertTrue(result["success"], result.get("message"))
+        self.assertTrue(result.success, result.message)
         with self.Session() as session:
             row = session.query(AirlineIndicators).one()
             self.assertEqual(150.0, float(row.value))
@@ -359,7 +359,7 @@ class DatabaseLockTest(MigratedDbCase):
         with self.Session() as session:
             result = DataImporter.import_data(LockedOnce(session), self.airport_payload())
 
-        self.assertTrue(result["success"], result.get("message"))
+        self.assertTrue(result.success, result.message)
         with self.Session() as session:
             self.assertEqual(1, session.query(AirportIndicators).count())
 
@@ -367,7 +367,7 @@ class DatabaseLockTest(MigratedDbCase):
         with self.Session() as session:
             result = DataImporter.import_data(LockedOnce(session), self.airline_payload())
 
-        self.assertTrue(result["success"], result.get("message"))
+        self.assertTrue(result.success, result.message)
         with self.Session() as session:
             self.assertEqual(1, session.query(AirlineIndicators).count())
 
@@ -381,8 +381,8 @@ class DatabaseLockTest(MigratedDbCase):
         with self.Session() as session:
             result = DataImporter.import_data(BrokenOnce(session), self.airport_payload())
 
-        self.assertFalse(result["success"])
-        self.assertIn("Ошибка базы данных", result["message"])
+        self.assertFalse(result.success)
+        self.assertIn("Ошибка базы данных", result.message)
 
     def test_unexpected_error_names_the_branch(self):
         class Failing(LockedOnce):
@@ -392,8 +392,8 @@ class DatabaseLockTest(MigratedDbCase):
         with self.Session() as session:
             result = DataImporter.import_data(Failing(session), self.airport_payload())
 
-        self.assertFalse(result["success"])
-        self.assertIn("аэропорта", result["message"])
+        self.assertFalse(result.success)
+        self.assertIn("аэропорта", result.message)
 
 
 if __name__ == "__main__":

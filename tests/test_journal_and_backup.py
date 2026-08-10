@@ -87,14 +87,14 @@ class VanishedRowsTest(PeriodReplacementCase):
         result = self.do_import([indicator_row("965", "120")])
 
         self.assertEqual(["965"], self.stored_codes())
-        self.assertEqual(1, result["removed"])
+        self.assertEqual(1, result.removed)
 
     def test_removal_is_reported_to_the_user(self):
         self.do_import([indicator_row("965", "100"), indicator_row("642", "50")])
 
         result = self.do_import([indicator_row("965", "120")])
 
-        self.assertIn("Удалено строк", result["message"])
+        self.assertIn("Удалено строк", result.message)
 
     def test_other_periods_are_untouched(self):
         """Заменяется период отчёта, а не вся отчётность предприятия."""
@@ -111,7 +111,7 @@ class VanishedRowsTest(PeriodReplacementCase):
 
         result = self.do_import(rows)
 
-        self.assertEqual(0, result["removed"])
+        self.assertEqual(0, result.removed)
         self.assertEqual(["642", "965"], self.stored_codes())
 
 

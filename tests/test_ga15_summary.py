@@ -253,7 +253,7 @@ class EnterpriseImportTest(MigratedDbCase):
             return {ap.name: ap for ap in session.query(Airport).all()}
 
     def test_import_succeeds(self):
-        self.assertTrue(self.do_import()["success"])
+        self.assertTrue(self.do_import().success)
 
     def test_every_block_becomes_an_airport(self):
         self.do_import()
@@ -267,9 +267,9 @@ class EnterpriseImportTest(MigratedDbCase):
         result = self.do_import()
 
         self.assertEqual(
-            {GA15_ENTERPRISE_NAME, "Алдан", "Батагай"}, set(result["created_entities"])
+            {GA15_ENTERPRISE_NAME, "Алдан", "Батагай"}, set(result.created_entities)
         )
-        self.assertIn("Алдан", result["message"])
+        self.assertIn("Алдан", result.message)
 
     def test_airports_point_at_their_enterprise(self):
         self.do_import()
@@ -313,8 +313,8 @@ class EnterpriseImportTest(MigratedDbCase):
 
         second = self.do_import()
 
-        self.assertEqual(0, second["imported"])
-        self.assertEqual(first["imported"], second["updated"])
+        self.assertEqual(0, second.imported)
+        self.assertEqual(first.imported, second.updated)
 
     def test_a_file_without_values_leaves_the_reference_alone(self):
         """Отказ не должен оставлять в справочнике записи из непринятого файла."""
@@ -327,7 +327,7 @@ class EnterpriseImportTest(MigratedDbCase):
         with self.Session() as session:
             result = DataImporter._import_airport_data(session, data)
 
-        self.assertFalse(result["success"])
+        self.assertFalse(result.success)
         self.assertEqual({}, self.airports())
 
 

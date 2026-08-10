@@ -97,7 +97,7 @@ class StoredValueTest(MigratedDbCase):
         with self.Session() as session:
             result = DataImporter._import_airline_data(session, self.payload(rows))
             session.commit()
-        self.assertTrue(result["success"], result.get("message"))
+        self.assertTrue(result.success, result.message)
 
     def values_by_code(self):
         with self.Session() as session:

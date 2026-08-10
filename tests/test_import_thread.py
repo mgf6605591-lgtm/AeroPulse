@@ -19,6 +19,8 @@ import unittest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from services.import_outcome import ImportOutcome, PeriodRequired
+
 try:
     from PyQt6.QtCore import QCoreApplication, QEventLoop, QTimer
     from PyQt6.QtWidgets import QApplication, QDialog
@@ -57,21 +59,14 @@ class StubImport:
 
         name = os.path.basename(file_path)
         if file_path in self.needs_period and month is None:
-            return {
-                "success": False,
-                "period_required": True,
-                "message": "период не определён",
-                "source_file": name,
-                "period_month": None,
-                "period_year": None,
-            }
-        return {
-            "success": True,
-            "message": "загружено строк: 1",
-            "source_file": name,
-            "period_month": month or "January",
-            "period_year": year or 2025,
-        }
+            return PeriodRequired(message="период не определён", source_file=name)
+        return ImportOutcome(
+            success=True,
+            message="загружено строк: 1",
+            source_file=name,
+            month=month or "January",
+            year=year or 2025,
+        )
 
 
 def fake_period_dialog(accepted: bool, month="March", year=2026, shown=None):
@@ -191,7 +186,7 @@ class ImportReportsEveryFileTest(ImportRunnerCase):
         outcome = self.run_to_end(runner)
 
         self.assertEqual(["а.xlsx", "б.xlsx", "в.xlsx"],
-                         [r["source_file"] for r in outcome["results"]])
+                         [r.source_file for r in outcome["results"]])
         self.assertFalse(outcome["cancelled"])
 
     def test_progress_counts_finished_files(self):
@@ -258,8 +253,8 @@ class ImportCanBeCancelledTest(ImportRunnerCase):
         outcome = self.run_to_end(runner)
 
         self.assertEqual(1, len(outcome["results"]))
-        self.assertEqual("а.xlsx", outcome["results"][0]["source_file"])
-        self.assertTrue(outcome["results"][0]["success"])
+        self.assertEqual("а.xlsx", outcome["results"][0].source_file)
+        self.assertTrue(outcome["results"][0].success)
 
 
 @unittest.skipUnless(HAS_QT, "PyQt6 не установлен")
@@ -281,7 +276,7 @@ class PeriodIsAskedInTheGuiThreadTest(ImportRunnerCase):
         # первого разбора — определить период, не прочитав файл, нечем.
         self.assertEqual([("а.xlsx", None, None), ("б.xlsx", None, None),
                           ("б.xlsx", "March", 2026)], stub.calls)
-        self.assertTrue(all(r["success"] for r in outcome["results"]))
+        self.assertTrue(all(r.success for r in outcome["results"]))
         self.assertEqual(2, len(outcome["results"]))
 
     def test_declined_period_skips_the_file_and_keeps_the_batch(self):
@@ -294,9 +289,9 @@ class PeriodIsAskedInTheGuiThreadTest(ImportRunnerCase):
         outcome = self.run_to_end(runner)
 
         first, second = outcome["results"]
-        self.assertFalse(first["success"])
-        self.assertIn("период", first["message"].lower())
-        self.assertTrue(second["success"])
+        self.assertFalse(first.success)
+        self.assertIn("период", first.message.lower())
+        self.assertTrue(second.success)
 
     def test_period_is_asked_once_per_file(self):
         """Если и с указанным периодом разбор его не увидел, вопрос не повторяется.
@@ -309,12 +304,10 @@ class PeriodIsAskedInTheGuiThreadTest(ImportRunnerCase):
 
         def always_needs_period(file_path, **kwargs):
             stub.calls.append((file_path, kwargs["month"], kwargs["year"]))
-            return {
-                "success": False,
-                "period_required": True,
-                "message": "период не определён",
-                "source_file": os.path.basename(file_path),
-            }
+            return PeriodRequired(
+                message="период не определён",
+                source_file=os.path.basename(file_path),
+            )
 
         shown = []
         runner = self.make_runner(
@@ -326,7 +319,7 @@ class PeriodIsAskedInTheGuiThreadTest(ImportRunnerCase):
 
         self.assertEqual(1, len(shown))
         self.assertEqual(1, len(outcome["results"]))
-        self.assertFalse(outcome["results"][0]["success"])
+        self.assertFalse(outcome["results"][0].success)
 
 
 if __name__ == "__main__":

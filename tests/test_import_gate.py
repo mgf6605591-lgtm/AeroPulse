@@ -25,6 +25,7 @@ from importers.data_importer import DataImporter
 from parsers.f15_xlsx_parser import F15XLSXParser
 from parsers.xlsx_parser import XLSXParser
 from parsers.xml_parser import XMLParser
+from services.import_outcome import PeriodRequired
 from services.import_service import ImportService
 from services.parse_service import ParseService
 from tests.support import MigratedDbCase, make_ga12_workbook
@@ -225,28 +226,28 @@ class ImporterRefusalTest(MigratedDbCase):
 
     def test_zero_records_is_a_failure(self):
         result = self.do_import([])
-        self.assertFalse(result["success"])
-        self.assertEqual(result["imported"], 0)
-        self.assertEqual(result["updated"], 0)
+        self.assertFalse(result.success)
+        self.assertEqual(result.imported, 0)
+        self.assertEqual(result.updated, 0)
 
     def test_missing_month_is_refused(self):
         result = self.do_import([self.indicator_row()], month=None)
-        self.assertFalse(result["success"])
-        self.assertIn("период", result["message"].lower())
+        self.assertFalse(result.success)
+        self.assertIn("период", result.message.lower())
 
     def test_missing_year_is_refused(self):
         result = self.do_import([self.indicator_row()], year=None)
-        self.assertFalse(result["success"])
+        self.assertFalse(result.success)
 
     def test_unknown_month_name_is_refused_not_defaulted(self):
         """Нераспознанное название месяца прежде превращалось в Months.January."""
         result = self.do_import([self.indicator_row()], month="Sarlacc")
-        self.assertFalse(result["success"])
+        self.assertFalse(result.success)
 
     def test_valid_import_still_succeeds(self):
         result = self.do_import([self.indicator_row()])
-        self.assertTrue(result["success"])
-        self.assertEqual(result["imported"], 1)
+        self.assertTrue(result.success)
+        self.assertEqual(result.imported, 1)
 
 
 class ImportServiceGateTest(MigratedDbCase, WorkbookCase):
@@ -272,8 +273,7 @@ class ImportServiceGateTest(MigratedDbCase, WorkbookCase):
     def test_file_without_period_asks_instead_of_importing(self):
         path = make_ga12_workbook(self.path("a.xlsx"), titul_period=None)
         result = ImportService.import_file(path, entity_type="airline", entity_id=self.airline_id)
-        self.assertFalse(result["success"])
-        self.assertTrue(result.get("period_required"))
+        self.assertIsInstance(result, PeriodRequired)
 
     def test_period_supplied_by_caller_lets_import_through(self):
         """Именно так mainWin повторяет импорт после ответа пользователя в диалоге."""
@@ -281,23 +281,23 @@ class ImportServiceGateTest(MigratedDbCase, WorkbookCase):
         result = ImportService.import_file(
             path, entity_type="airline", entity_id=self.airline_id, month="July", year=2024
         )
-        self.assertTrue(result["success"], result.get("message"))
-        self.assertEqual(result["period_month"], "July")
-        self.assertEqual(result["period_year"], 2024)
+        self.assertTrue(result.success, result.message)
+        self.assertEqual(result.month, "July")
+        self.assertEqual(result.year, 2024)
 
     def test_ga12_file_is_refused_for_airport(self):
         """Тот самый сценарий DATA-6: бланк авиакомпании при выбранном аэропорте."""
         path = make_ga12_workbook(self.path("c.xlsx"))
         result = ImportService.import_file(path, entity_type="airport", entity_id=self.airport_id)
-        self.assertFalse(result["success"])
-        self.assertIn("12-ГА", result["message"])
+        self.assertFalse(result.success)
+        self.assertIn("12-ГА", result.message)
 
     def test_f15_file_is_refused_for_airline(self):
         """Обратная сторона той же защиты: бланк аэропорта при выбранной авиакомпании."""
         path = make_f15_workbook(self.path("d.xlsx"))
         result = ImportService.import_file(path, entity_type="airline", entity_id=self.airline_id)
-        self.assertFalse(result["success"])
-        self.assertIn("15-ГА", result["message"])
+        self.assertFalse(result.success)
+        self.assertIn("15-ГА", result.message)
 
 
 REAL_GA12 = "12-га январь.xlsx"

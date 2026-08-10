@@ -247,7 +247,7 @@ class AirlineFromTheFileTest(MigratedDbCase):
             )
 
     def test_the_report_goes_into_the_airline_already_in_the_register(self):
-        self.assertTrue(self.do_import()["success"])
+        self.assertTrue(self.do_import().success)
 
         self.assertEqual({ALROSA_IN_REGISTER, YAKUTIA_IN_REGISTER}, set(self.airlines()))
         self.assertTrue(self.rows_of(ALROSA_IN_REGISTER))
@@ -262,7 +262,7 @@ class AirlineFromTheFileTest(MigratedDbCase):
     def test_an_unknown_airline_is_entered_with_the_code_from_the_file(self):
         result = self.do_import(name=POLAR_IN_REPORT, okpo="2542")
 
-        self.assertTrue(result["success"])
+        self.assertTrue(result.success)
         entered = self.airlines()[POLAR_IN_REPORT]
         self.assertEqual("2542", entered.code)
 
@@ -270,22 +270,22 @@ class AirlineFromTheFileTest(MigratedDbCase):
         """Импорт пополняет справочник — узнавать об этом задним числом нельзя."""
         result = self.do_import(name=POLAR_IN_REPORT, okpo="2542")
 
-        self.assertEqual([POLAR_IN_REPORT], result["created_entities"])
-        self.assertIn("Полярные авиалинии", result["message"])
-        self.assertIn("авиакомпаний", result["message"])
+        self.assertEqual((POLAR_IN_REPORT,), result.created_entities)
+        self.assertIn("Полярные авиалинии", result.message)
+        self.assertIn("авиакомпаний", result.message)
 
     def test_a_file_without_readable_rows_leaves_the_register_alone(self):
         """Отказ не должен оставлять запись из файла, который в базу не попал."""
         result = self.do_import(name=POLAR_IN_REPORT, okpo="2542", rows=())
 
-        self.assertFalse(result["success"])
+        self.assertFalse(result.success)
         self.assertNotIn(POLAR_IN_REPORT, self.airlines())
 
     def test_a_file_that_names_no_airline_is_refused(self):
         result = self.do_import(name=None, okpo=None)
 
-        self.assertFalse(result["success"])
-        self.assertIn("не названа", result["message"])
+        self.assertFalse(result.success)
+        self.assertIn("не названа", result.message)
         self.assertEqual(2, len(self.airlines()))
 
     def test_the_chosen_airline_still_wins_over_the_file(self):
@@ -295,7 +295,7 @@ class AirlineFromTheFileTest(MigratedDbCase):
         with self.Session() as session:
             result = DataImporter._import_airline_data(session, data)
 
-        self.assertTrue(result["success"])
+        self.assertTrue(result.success)
         self.assertEqual({ALROSA_IN_REGISTER, YAKUTIA_IN_REGISTER}, set(self.airlines()))
         self.assertTrue(self.rows_of(YAKUTIA_IN_REGISTER))
 
