@@ -143,16 +143,16 @@ class Ga15PivotUsesTheLayoutTest(MigratedDbCase):
             session.add(Airport(id=1, code="ЯКТ", name="Якутск", locality_id=1))
             session.commit()
 
-        session_patch = patch("controllers.data_controller.get_session", Session)
+        session_patch = patch("controllers.reports.ga15_airport.get_session", Session)
         session_patch.start()
         self.addCleanup(session_patch.stop)
 
     def build(self, aggregate_rows):
-        from controllers.data_controller import DataController
+        from controllers.reports import ga15_airport
 
-        with patch("controllers.data_controller.AirportIndicatorService.aggregate",
+        with patch("controllers.airport_ind_service.AirportIndicatorService.aggregate",
                    return_value=aggregate_rows):
-            return DataController()._load_pivot_ga15_airport(ReportFilters(), airport_id=1)
+            return ga15_airport.build(ReportFilters(), airport_id=1)
 
     def row09(self, result):
         for row in result["rows"]:

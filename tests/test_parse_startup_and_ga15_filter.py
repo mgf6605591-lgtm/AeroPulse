@@ -242,18 +242,18 @@ class Ga15FilterHidesRowsTest(MigratedDbCase):
             session.commit()
         self.id_by_code = {code: n for n, code in enumerate(GA15_TEST_CODES, start=1)}
 
-        session_patch = patch("controllers.data_controller.get_session", Session)
+        session_patch = patch("controllers.reports.ga15_airport.get_session", Session)
         session_patch.start()
         self.addCleanup(session_patch.stop)
 
     def build(self, aggregate_rows=(), codes=None, indicator_ids=None):
-        from controllers.data_controller import DataController
+        from controllers.reports import ga15_airport
 
         if indicator_ids is None:
             indicator_ids = tuple(self.id_by_code[c] for c in (codes or ()))
-        with patch("controllers.data_controller.AirportIndicatorService.aggregate",
+        with patch("controllers.airport_ind_service.AirportIndicatorService.aggregate",
                    return_value=list(aggregate_rows)):
-            return DataController()._load_pivot_ga15_airport(
+            return ga15_airport.build(
                 ReportFilters(indicator_ids=tuple(indicator_ids)), airport_id=1
             )
 

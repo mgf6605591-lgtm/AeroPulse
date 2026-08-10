@@ -16,7 +16,7 @@
 
 import unittest
 
-from controllers.data_controller import _norm_regularity, _norm_route_type
+from controllers.reports.ga12_pivot import _norm_regularity, _norm_route_type
 from db.models.entities import Indicator
 from db.models.enums import RouteType, ShippingRegularity
 from tests.support import FakeRecord, PivotCase

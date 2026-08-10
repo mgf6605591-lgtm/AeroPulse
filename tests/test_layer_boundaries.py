@@ -60,12 +60,14 @@ for forbidden in ('PyQt6', 'services'):
 
 import controllers
 
-modules = list(pkgutil.iter_modules(controllers.__path__))
-if not modules:
-    raise AssertionError('в пакете не нашлось ни одного модуля — обход пустой')
+# walk_packages, а не iter_modules: с появлением controllers/reports/ (ARCH-15)
+# плоский обход поднимал бы сам подпакет и ни одного модуля внутри него.
+modules = list(pkgutil.walk_packages(controllers.__path__, prefix='controllers.'))
+if len(modules) < 2:
+    raise AssertionError('обход нашёл меньше двух модулей — проверять нечего')
 
 for info in modules:
-    importlib.import_module('controllers.%s' % info.name)
+    importlib.import_module(info.name)
 """
 
 
@@ -80,8 +82,10 @@ class ControllersNeedNoGuiTest(unittest.TestCase):
         self.assertEqual(0, result.returncode, result.stderr)
 
     def _importers_of(self, package: str):
+        """Файлы слоя, импортирующие пакет. rglob: подпакет `reports/` — тоже слой."""
+        root = PROJECT_ROOT / "controllers"
         return [
-            path.name for path in (PROJECT_ROOT / "controllers").glob("*.py")
+            str(path.relative_to(root)) for path in root.rglob("*.py")
             if re.search(rf"^\s*(import|from)\s+{package}", path.read_text(encoding="utf-8"), re.M)
         ]
 

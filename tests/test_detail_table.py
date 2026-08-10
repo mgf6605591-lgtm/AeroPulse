@@ -46,9 +46,9 @@ class DetailColumnsTest(unittest.TestCase):
 
     def load(self, mode=MODE_AIRLINE):
         service = (
-            "controllers.data_controller.AirlineIndicatorService.detail_rows"
+            "controllers.airline_ind_service.AirlineIndicatorService.detail_rows"
             if mode == MODE_AIRLINE
-            else "controllers.data_controller.AirportIndicatorService.detail_rows"
+            else "controllers.airport_ind_service.AirportIndicatorService.detail_rows"
         )
         with patch(service, return_value=self.rows()):
             return self.controller.load_detail_data(mode, ReportFilters(indicator_ids=(1,)))
@@ -116,7 +116,7 @@ class DetailRowsAreDistinguishableTest(unittest.TestCase):
                       route_type=RouteType.trunk, regularity=ShippingRegularity.irregular),
         ]
         with patch(
-            "controllers.data_controller.AirlineIndicatorService.detail_rows",
+            "controllers.airline_ind_service.AirlineIndicatorService.detail_rows",
             return_value=rows,
         ):
             data = DataController().load_detail_data(MODE_AIRLINE, ReportFilters(indicator_ids=(1,)))

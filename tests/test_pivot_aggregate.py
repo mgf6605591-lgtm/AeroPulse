@@ -20,6 +20,7 @@ from db.models.entities import (
 )
 from db.models.enums import Months, RouteType, ShippingRegularity
 from controllers.report_filters import ReportFilters
+from controllers.reports import ga12_pivot
 from tests.support import MigratedDbCase, PivotCase, FakeRecord
 
 
@@ -44,42 +45,42 @@ class PivotDoesNotLoadFactsTest(PivotCase):
         from tests.support import aggregate_rows
 
         with patch(
-            "controllers.data_controller.AirlineIndicatorService.detail_rows",
+            "controllers.airline_ind_service.AirlineIndicatorService.detail_rows",
             side_effect=AssertionError("свод читает факты вместо агрегата"),
         ), patch(
-            "controllers.data_controller.AirlineIndicatorService.aggregate",
+            "controllers.airline_ind_service.AirlineIndicatorService.aggregate",
             return_value=aggregate_rows(self.records),
         ):
             return build()
 
     def test_all_airlines(self):
         result = self.build_without_facts(
-            lambda: self.controller._load_pivot_all_airlines(ReportFilters(indicator_ids=(1,)))
+            lambda: ga12_pivot.all_airlines(ReportFilters(indicator_ids=(1,)))
         )
         self.assertEqual(100, self.row_for_code(result, "965")["m_2025_January_total"])
 
     def test_per_airline_by_routes(self):
         result = self.build_without_facts(
-            lambda: self.controller._load_pivot_per_airline(ReportFilters(), airline_id=1)
+            lambda: ga12_pivot.per_airline(ReportFilters(), airline_id=1)
         )
         self.assertEqual(100, self.row_for_code(result, "965")["m_2025_January_rt_trunk"])
 
     def test_per_airline_summary(self):
         result = self.build_without_facts(
-            lambda: self.controller._load_pivot_per_airline_summary(ReportFilters(), airline_id=1)
+            lambda: ga12_pivot.per_airline_summary(ReportFilters(), airline_id=1)
         )
         self.assertEqual(100, self.row_for_code(result, "965")["m_2025_January"])
 
     def test_multi_airline_by_routes(self):
         result = self.build_without_facts(
-            lambda: self.controller._load_pivot_multi_airline_by_routes(ReportFilters(indicator_ids=(1,)))
+            lambda: ga12_pivot.multi_airline_by_routes(ReportFilters(indicator_ids=(1,)))
         )
         self.assertEqual(100, self.row_for_code(result, "965")["m_2025_January_aid_1_rt_trunk"])
 
     def test_records_count_counts_facts_not_groups(self):
         """В счётчике записей — число строк отчётности, как и раньше."""
         result = self.build_without_facts(
-            lambda: self.controller._load_pivot_all_airlines(ReportFilters(indicator_ids=(1,)))
+            lambda: ga12_pivot.all_airlines(ReportFilters(indicator_ids=(1,)))
         )
         self.assertEqual(2, result["stats"]["records"])
 

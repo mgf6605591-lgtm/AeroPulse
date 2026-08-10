@@ -12,12 +12,12 @@
 
 import unittest
 
-from controllers.data_controller import (
-    _period_col_key,
-    _period_count,
-    _period_label,
-    _sorted_periods,
+from controllers.reports.common import (
     EMPTY_PERIOD,
+    period_col_key,
+    period_count,
+    period_label,
+    sorted_periods,
 )
 from tests.support import FakeRecord, PivotCase
 
@@ -28,23 +28,23 @@ class PeriodHelpersTest(unittest.TestCase):
     def test_periods_are_ordered_chronologically(self):
         periods = {(2025, "January"), (2024, "December"), (2024, "January")}
         self.assertEqual(
-            _sorted_periods(periods),
+            sorted_periods(periods),
             [(2024, "January"), (2024, "December"), (2025, "January")],
         )
 
     def test_column_key_contains_the_year(self):
         self.assertNotEqual(
-            _period_col_key((2024, "January")),
-            _period_col_key((2025, "January")),
+            period_col_key((2024, "January")),
+            period_col_key((2025, "January")),
         )
 
     def test_label_names_the_year(self):
-        self.assertEqual(_period_label((2025, "January")), "Январь 2025")
+        self.assertEqual(period_label((2025, "January")), "Январь 2025")
 
     def test_empty_period_is_not_counted(self):
         """Заглушка пустой выборки — кортеж, а он истинен: считать её нельзя."""
-        self.assertEqual(_period_count([EMPTY_PERIOD]), 0)
-        self.assertEqual(_period_count([(2025, "January")]), 1)
+        self.assertEqual(period_count([EMPTY_PERIOD]), 0)
+        self.assertEqual(period_count([(2025, "January")]), 1)
 
 
 class TwoYearPivotTest(PivotCase):

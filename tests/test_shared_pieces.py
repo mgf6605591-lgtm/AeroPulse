@@ -244,7 +244,7 @@ class NoTwinsLeftTest(unittest.TestCase):
         self.assertFalse(hasattr(MultiLevelHeaderView, "_paint_section_no_hover"))
 
     def test_empty_pivot_rows_are_built_by_one_function(self):
-        from controllers.data_controller import (
+        from controllers.reports.ga12_pivot import (
             _pivot_section_header_row,
             _pivot_subheading_row,
             _pivot_text_row,
@@ -258,7 +258,7 @@ class NoTwinsLeftTest(unittest.TestCase):
 
     def test_section_header_is_decorated_and_subheading_is_not(self):
         """Отличие у них было ровно одно — оформление подписи."""
-        from controllers.data_controller import (
+        from controllers.reports.ga12_pivot import (
             _pivot_section_header_row,
             _pivot_subheading_row,
         )

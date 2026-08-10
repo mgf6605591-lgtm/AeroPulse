@@ -15,7 +15,7 @@
 
 import unittest
 
-from controllers.data_controller import _route_type_keys_for_total_sum
+from controllers.reports.ga12_pivot import _route_type_keys_for_total_sum
 from controllers.report_filters import ReportFilters
 from tests.support import FakeRecord, PivotCase
 

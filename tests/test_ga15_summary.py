@@ -21,7 +21,7 @@ from unittest.mock import patch
 
 from sqlalchemy.orm import sessionmaker
 
-from controllers.data_controller import DataController
+from controllers.reports import ga15_summary
 from controllers.report_filters import ReportFilters
 from db.models.entities import Airport, AirportIndicators, Indicator, Locality
 from importers.data_importer import DataImporter
@@ -366,16 +366,16 @@ class Ga15SummaryPivotTest(MigratedDbCase):
             session.commit()
         self.id_by_tag = {tag: n for n, tag in enumerate(GA15_METRIC_TAGS, start=1)}
 
-        session_patch = patch("controllers.data_controller.get_session", Session)
+        session_patch = patch("controllers.reports.ga15_summary.get_session", Session)
         session_patch.start()
         self.addCleanup(session_patch.stop)
 
     def build(self, rows=(), **filters):
         base = {"period_from": (2025, 1), "period_to": (2025, 3)}
         base.update(filters)
-        with patch("controllers.data_controller.AirportIndicatorService.aggregate",
+        with patch("controllers.airport_ind_service.AirportIndicatorService.aggregate",
                    return_value=list(rows)):
-            return DataController()._load_pivot_ga15_summary(ReportFilters(**base))
+            return ga15_summary.build(ReportFilters(**base))
 
     @staticmethod
     def titles(result):
