@@ -18,6 +18,10 @@
 
 Проверяется так же, как граница пакета данных в ARCH-3: запретом импорта в
 отдельном процессе, а не разглядыванием кода.
+
+Здесь же — проверка обратного свойства: что модуль слоя вообще кому-то нужен
+(ARCH-17). Оба вопроса об одном — о рёбрах графа импортов, только первый требует,
+чтобы ребра не было, а второй — чтобы хоть одно было.
 """
 
 import os
@@ -100,6 +104,60 @@ class ControllersNeedNoGuiTest(unittest.TestCase):
     def test_layer_does_not_reach_into_services(self):
         """Кольцо ARCH-14: `controllers/` не зовёт `services/` ни одним модулем."""
         self.assertEqual([], self._importers_of("services"))
+
+
+class NoUnreachableModulesTest(unittest.TestCase):
+    """Модуль, которого никто не импортирует, — мёртвый код (ARCH-17).
+
+    `UserController` пролежал так всю жизнь проекта: девять строк, один метод
+    `get_user_by_login` и ни одной ссылки — запрос, который он предлагал, к тому
+    времени уже стоял внутри `AuthService.sign_in`. Реестр числил его «артефактом
+    первоначальной структуры», то есть кодом не на своём месте; на месте
+    выяснилось, что места у него нет вовсе.
+
+    `ruff` такого не видит: `F401` — про неиспользованный импорт внутри модуля, а
+    не про модуль, который не импортирует никто. Компиляция и прогон тоже молчат —
+    мёртвый модуль не мешает ничему, кроме чтения.
+
+    Проверяются `controllers/` и `services/`: точек входа в них нет, каждый модуль
+    обязан кем-то вызываться. `forms/`, `main.py` и миграции под правило не
+    попадают — их зовёт Qt, ярлык и Alembic соответственно.
+    """
+
+    LAYERS = ("controllers", "services")
+
+    def _sources(self):
+        for path in PROJECT_ROOT.rglob("*.py"):
+            parts = path.relative_to(PROJECT_ROOT).parts
+            if any(part.startswith(".") or part in ("build", "dist") for part in parts):
+                continue
+            yield path
+
+    def test_every_module_of_the_layer_is_imported_by_somebody(self):
+        sources = list(self._sources())
+        orphans = []
+
+        for layer in self.LAYERS:
+            for module in sorted((PROJECT_ROOT / layer).rglob("*.py")):
+                if module.name == "__init__.py":
+                    continue
+                dotted = ".".join(module.relative_to(PROJECT_ROOT).with_suffix("").parts)
+                parent, _, leaf = dotted.rpartition(".")
+                # Две формы записи: `from пакет.модуль import имя` и
+                # `from пакет import модуль` — вторая иначе читалась бы как «никто».
+                referenced = re.compile(
+                    rf"^\s*(?:from|import)\s+{re.escape(dotted)}\b"
+                    rf"|^\s*from\s+{re.escape(parent)}\s+import\s+.*\b{re.escape(leaf)}\b",
+                    re.M,
+                )
+                if not any(
+                    referenced.search(other.read_text(encoding="utf-8"))
+                    for other in sources
+                    if other != module
+                ):
+                    orphans.append(dotted)
+
+        self.assertEqual([], orphans)
 
 
 class WorkbookIsWrittenWithoutQtTest(unittest.TestCase):
