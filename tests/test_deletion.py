@@ -35,7 +35,7 @@ from db.models.entities import (
     Shipping,
 )
 from db.models.enums import Months, RouteType, ShippingRegularity
-from services.deletion_service import delete_indicators
+from services.deletion_service import BackupUnavailable, delete_indicators
 from tests.support import MigratedDbCase
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -148,22 +148,47 @@ class BackupTest(DeletionCase):
             connection.close()
         self.assertEqual([(1,), (2,), (3,)], saved)
 
-    def test_backup_failure_does_not_stop_the_deletion(self):
-        """Копия важна, но не важнее того, ради чего пользователь пришёл."""
+    def test_backup_failure_stops_the_deletion(self):
+        """FUNC-13: прежде неудача уходила в журнал приложения, а удаление шло."""
         with patch("services.deletion_service.make_backup", side_effect=OSError("нет места")):
-            result = delete_indicators("airline", [1])
+            with self.assertRaises(BackupUnavailable):
+                delete_indicators("airline", [1])
+
+        self.assertEqual([1, 2, 3], self.airline_ids())
+        self.assertEqual([], self.journal_rows())
+
+    def test_the_reason_travels_with_the_refusal(self):
+        """Вызывающему нужно назвать причину человеку, а не «что-то пошло не так»."""
+        with patch("services.deletion_service.make_backup", side_effect=OSError("нет места")):
+            with self.assertRaises(BackupUnavailable) as caught:
+                delete_indicators("airline", [1])
+
+        self.assertIn("нет места", str(caught.exception))
+
+    def test_an_explicit_waiver_lets_the_deletion_through(self):
+        """Так окно поступает, когда человек ответил «удалять всё равно»."""
+        with patch("services.deletion_service.make_backup", side_effect=OSError("нет места")):
+            result = delete_indicators("airline", [1], require_backup=False)
 
         self.assertIsNone(result.backup)
         self.assertEqual(1, result.deleted)
         self.assertEqual([2, 3], self.airline_ids())
 
-    def test_failed_backup_is_named_in_the_journal(self):
+    def test_waived_backup_is_named_in_the_journal(self):
         """Иначе по журналу не отличить удаление с копией от удаления без неё."""
         with patch("services.deletion_service.make_backup", side_effect=OSError("нет места")):
-            delete_indicators("airline", [1])
+            delete_indicators("airline", [1], require_backup=False)
 
         (row,) = self.journal_rows()
         self.assertEqual("копия базы не снята", row.message)
+
+    def test_nothing_to_copy_is_not_a_failure(self):
+        """Базы нет — копировать нечего и удалять нечего; это не отказ копирования."""
+        with patch("services.deletion_service.make_backup", return_value=None):
+            result = delete_indicators("airline", [1])
+
+        self.assertIsNone(result.backup)
+        self.assertEqual(1, result.deleted)
 
 
 class JournalTest(DeletionCase):
