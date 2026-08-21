@@ -49,7 +49,11 @@ if HAS_QT:
     from forms.models.pivot_dict_model import PivotDictModel
     from forms.models.roles import RAW_VALUE_ROLE
     from forms.models.sqlalchemy_table_model import SQLAlchemyTableModel
-    from forms.widgets.multilevel_header import MultiLevelHeaderView
+    from forms.widgets.multilevel_header import (
+        TEXT_MARGIN,
+        MultiLevelHeaderView,
+        wrap_header_text,
+    )
 
 
 # --- ARCH-3: слой данных без интерфейса ------------------------------------
@@ -410,6 +414,130 @@ class DefaultRoleIsDisplayTest(unittest.TestCase):
         model.set_source_data([{"k": 1}], ["колонка"], ["k"])
 
         self.assertEqual("колонка", model.headerData(0, Qt.Orientation.Horizontal))
+
+
+# --- Перенос длинных подписей заголовка -------------------------------------
+
+class FixedWidthMetrics:
+    """Метрики шрифта, где каждая буква ровно 10 пикселей.
+
+    Настоящие `QFontMetrics` зависят от шрифта системы, и проверять по ним
+    «сколько строк вышло» значило бы проверять шрифт, а не перенос.
+    """
+
+    def horizontalAdvance(self, text: str) -> int:
+        return 10 * len(text)
+
+
+@unittest.skipUnless(HAS_QT, "PyQt6 не установлен")
+class WrapHeaderTextTest(unittest.TestCase):
+    """Подпись обрезалась по ширине колонки: от названия оставалась середина."""
+
+    metrics = FixedWidthMetrics()
+
+    def wrap(self, text: str, width: int) -> list[str]:
+        return wrap_header_text(text, width, self.metrics)
+
+    def test_short_label_stays_one_line(self):
+        self.assertEqual(["Свод"], self.wrap("Свод", 200))
+
+    def test_long_label_breaks_between_words(self):
+        self.assertEqual(
+            ["Акционерное", "общество", "Якутия"],
+            self.wrap("Акционерное общество Якутия", 120),
+        )
+
+    def test_nothing_is_lost_on_the_way(self):
+        text = 'Общество с ограниченной ответственностью "Авиакомпания "Полярные авиалинии"'
+
+        for width in (40, 90, 150, 300, 1000):
+            with self.subTest(width=width):
+                # Пробелы не в счёт: слишком длинное слово рвётся по буквам,
+                # и куски становятся отдельными строками.
+                joined = "".join(self.wrap(text, width))
+                self.assertEqual("".join(text.split()), "".join(joined.split()))
+
+    def test_every_line_fits_the_width(self):
+        text = 'Акционерное общество "Авиакомпания "Якутия"'
+
+        for width in (30, 70, 130, 400):
+            with self.subTest(width=width):
+                for line in self.wrap(text, width):
+                    self.assertLessEqual(self.metrics.horizontalAdvance(line), width, line)
+
+    def test_word_longer_than_the_column_is_split_by_letters(self):
+        """Иначе «при любой ширине» не выполняется: такое слово осталось бы обрезанным."""
+        lines = self.wrap("Авиакомпания", 50)
+
+        self.assertEqual(["Авиак", "омпан", "ия"], lines)
+        self.assertEqual("Авиакомпания", "".join(lines))
+
+    def test_column_without_width_keeps_the_label_whole(self):
+        """Ширины ещё нет — рвать не по чему; подпись отдаётся целиком, без зацикливания."""
+        self.assertEqual(["Свод"], self.wrap("Свод", 0))
+
+
+@unittest.skipUnless(HAS_QT, "PyQt6 не установлен")
+class HeaderShowsTheWholeLabelTest(HeaderCase):
+    """Высота шапки идёт за переносом: весь текст виден при любой ширине колонки."""
+
+    LONG = 'Акционерное общество "Авиакомпания "Полярные авиалинии"'
+
+    def set_long_header(self, column: int = 1):
+        headers = [f"колонка {i}" for i in range(self.COLUMNS)]
+        headers[column] = self.LONG
+        keys = [f"k{i}" for i in range(self.COLUMNS)]
+        self.model.set_source_data([{k: 1 for k in keys}], headers, keys)
+        for col in range(self.COLUMNS):
+            self.view.setColumnWidth(col, self.COLUMN_WIDTH)
+        QApplication.processEvents()
+
+    def lines_of(self, column: int) -> list[str]:
+        width = self.header.sectionSize(column) - 2 * TEXT_MARGIN
+        return wrap_header_text(
+            self.model.headerData(column, Qt.Orientation.Horizontal),
+            width, self.header.fontMetrics(),
+        )
+
+    def test_short_labels_leave_the_header_one_line_high(self):
+        one_line = self.header.fontMetrics().height() + self.header._group_height
+
+        self.assertLess(self.header.required_height(), 2 * one_line)
+
+    def test_header_grows_to_fit_the_wrapped_label(self):
+        self.set_long_header()
+        lines = self.lines_of(1)
+
+        self.assertGreater(len(lines), 1)
+        self.assertGreaterEqual(
+            self.header.height(),
+            len(lines) * self.header.fontMetrics().height() + self.header._group_height,
+        )
+
+    def test_narrowing_the_column_raises_the_header(self):
+        self.set_long_header()
+        before = self.header.height()
+
+        self.view.setColumnWidth(1, 40)
+        QApplication.processEvents()
+
+        self.assertGreater(self.header.height(), before)
+        self.assertGreaterEqual(
+            self.header.height(),
+            len(self.lines_of(1)) * self.header.fontMetrics().height()
+            + self.header._group_height,
+        )
+
+    def test_widening_the_column_lowers_the_header_back(self):
+        """Шапка не остаётся высокой навсегда: место возвращается таблице."""
+        self.set_long_header()
+        tall = self.header.height()
+
+        self.view.setColumnWidth(1, 900)
+        QApplication.processEvents()
+
+        self.assertLess(self.header.height(), tall)
+        self.assertEqual(1, len(self.lines_of(1)))
 
 
 if __name__ == "__main__":

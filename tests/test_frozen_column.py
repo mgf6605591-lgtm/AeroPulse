@@ -193,6 +193,66 @@ class FrozenColumnLinesUpTest(FrozenColumnCase):
 
 
 @unittest.skipUnless(HAS_QT, "PyQt6 не установлен")
+class FrozenColumnGrowsWithTheHeaderTest(FrozenColumnCase):
+    """Длинное название переносится на несколько строк — шапка растёт.
+
+    Накладка мерит одну колонку, «Показатель», и осталась бы низкой: высоту
+    шапке задаёт самое длинное из названий предприятий, а его в накладке нет.
+    Шапки разной высоты — это строки, разъехавшиеся по вертикали.
+    """
+
+    LONG = 'Акционерное общество "Авиакомпания "Полярные авиалинии"'
+
+    def load_long_names(self):
+        data = pivot_data()
+        data["headers"] = [
+            f"{self.LONG} {col - 3}" if 3 <= col < 3 + AIRLINES else header
+            for col, header in enumerate(data["headers"])
+        ]
+        with patch.object(self.widget.data_controller, "load_pivot_data", return_value=data):
+            self.widget.load_data(self.mode, self.filters)
+        QApplication.processEvents()
+
+    def test_header_grows_over_a_single_line(self):
+        before = self.widget.grouped_header.height()
+
+        self.load_long_names()
+
+        self.assertGreater(self.widget.grouped_header.height(), before)
+
+    def test_overlay_header_keeps_the_same_height(self):
+        self.load_long_names()
+
+        self.assertEqual(
+            self.widget.grouped_header.height(),
+            self.frozen.view.horizontalHeader().height(),
+        )
+
+    def test_rows_still_line_up(self):
+        self.load_long_names()
+
+        for row in (0, 3, 7):
+            with self.subTest(row=row):
+                self.assertEqual(
+                    self.table.rowViewportPosition(row),
+                    self.frozen.view.rowViewportPosition(row),
+                )
+
+    def test_narrowing_a_column_raises_both_headers(self):
+        self.load_long_names()
+        before = self.widget.grouped_header.height()
+
+        self.table.setColumnWidth(4, 40)
+        QApplication.processEvents()
+
+        self.assertGreater(self.widget.grouped_header.height(), before)
+        self.assertEqual(
+            self.widget.grouped_header.height(),
+            self.frozen.view.horizontalHeader().height(),
+        )
+
+
+@unittest.skipUnless(HAS_QT, "PyQt6 не установлен")
 class FrozenColumnWidthTest(FrozenColumnCase):
     """Ширину колонки по-прежнему можно менять — с любой из двух сторон (BUG-10)."""
 
