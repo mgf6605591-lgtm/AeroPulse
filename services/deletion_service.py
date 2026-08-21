@@ -23,29 +23,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from collections.abc import Sequence
 
-from db.backup import make_backup
-from db.database import db_path, get_session
-from db.models.entities import AirlineIndicators, AirportIndicators
+from db.database import get_session
 from services import journal_service as journal
+from services.indicator_records import BackupUnavailable, guarded_backup, table_for
 
 log = logging.getLogger(__name__)
 
-# Вид отчётности → таблица, из которой удаляют. Словарь, а не пара веток `if`:
-# неизвестный вид должен быть отказом, а не молчаливым попаданием в аэропорты.
-_MODEL_BY_ENTITY = {
-    "airline": AirlineIndicators,
-    "airport": AirportIndicators,
-}
-
-
-class BackupUnavailable(RuntimeError):
-    """Копию базы снять не удалось, а удаление её не дождалось (FUNC-13).
-
-    Отдельное исключение, а не общий отказ: оно означает не «удалить не вышло»,
-    а «удалить пока не пробовали». Копия снимается **до** удаления, поэтому в
-    этот момент ещё ничего не потеряно и решение можно оставить пользователю —
-    для этого у `delete_indicators` есть `require_backup=False`.
-    """
+# Имя оставлено импортируемым отсюда: удаление — главный повод для отказа из-за
+# копии, и вызывающие ловят его рядом с `delete_indicators`.
+__all__ = ["BackupUnavailable", "DeletionResult", "delete_indicators"]
 
 
 @dataclass(frozen=True)
@@ -76,11 +62,8 @@ def delete_indicators(
     писалась в журнал приложения, а удаление шло дальше — и «Готово» выглядело
     так же, как с копией (FUNC-13).
     """
-    model = _MODEL_BY_ENTITY.get(entity_type)
-    if model is None:
-        raise ValueError(f"Неизвестный вид отчётности: {entity_type!r}")
-
-    backup_path = _make_backup(require_backup)
+    model = table_for(entity_type).model
+    backup_path = guarded_backup(require_backup=require_backup, reason="delete")
 
     deleted = 0
     with get_session() as session:
@@ -100,20 +83,3 @@ def delete_indicators(
         user=user,
     )
     return DeletionResult(deleted=deleted, backup=backup_path)
-
-
-def _make_backup(require_backup: bool) -> Path | None:
-    """Копия базы перед удалением.
-
-    None означает «копировать было нечего»: файла базы нет — `make_backup`
-    сообщает об этом возвратом, а не исключением, и удалять там тоже нечего.
-    Настоящая неудача — исключение, и она либо останавливает удаление, либо
-    прощена вызывающим; в журнал приложения она попадает в обоих случаях.
-    """
-    try:
-        return make_backup(db_path(), reason="delete")
-    except Exception as error:
-        log.exception("Не удалось снять копию базы")
-        if require_backup:
-            raise BackupUnavailable(str(error)) from error
-        return None

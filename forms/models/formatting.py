@@ -11,11 +11,14 @@
 «где-нибудь в утилитах» — приглашение позвать его из экспорта, а это ровно тот
 путь, которым числа однажды уже уехали в файл текстом (FUNC-2).
 """
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 # Русская запись: пробел разделяет разряды, запятая отделяет дробную часть.
 _THOUSANDS_SEPARATOR = " "
 _DECIMAL_SEPARATOR = ","
+# Неразрывный и узкий неразрывный пробелы: так разряды разделяет Excel, и из
+# него значение чаще всего и приезжает через буфер обмена.
+_SPACES = (" ", "\u00a0", "\u202f")
 
 
 def format_number_ru(value: int | float | Decimal) -> str:
@@ -32,3 +35,31 @@ def format_number_ru(value: int | float | Decimal) -> str:
         .replace(",", _THOUSANDS_SEPARATOR)
         .replace(".", _DECIMAL_SEPARATOR)
     )
+
+
+def parse_number_ru(text: str) -> Decimal:
+    """Число из того, что набрал человек: «1 234,57», «1234.57», «-3».
+
+    Обратная сторона `format_number_ru`: в таблице значение показано с запятой и
+    пробелами между разрядами, и правят его в том же виде. Точка тоже принимается
+    — на цифровой клавиатуре запятой нет.
+
+    Результат — `Decimal`, а не `float`: значение хранится десятичным ровно затем,
+    чтобы не превращаться в двоичное приближение по дороге (см. db/models/types.py).
+    Неразбираемый текст — `ValueError` с текстом для человека.
+    """
+    cleaned = str(text).strip()
+    for space in _SPACES:
+        cleaned = cleaned.replace(space, "")
+    cleaned = cleaned.replace(_DECIMAL_SEPARATOR, ".")
+    if not cleaned:
+        raise ValueError("Значение не заполнено")
+    try:
+        value = Decimal(cleaned)
+    except InvalidOperation:
+        raise ValueError(f"«{text}» не похоже на число") from None
+    # `Decimal` понимает «nan» и «inf» как числа; в отчётности их не бывает, а в
+    # базу они ушли бы текстом и вернулись бы оттуда тем же.
+    if not value.is_finite():
+        raise ValueError(f"«{text}» не похоже на число")
+    return value

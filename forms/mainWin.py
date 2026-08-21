@@ -20,12 +20,14 @@ from PyQt6.QtWidgets import (
 from db.backup import make_backup
 from db.database import db_path
 from services.deletion_service import BackupUnavailable, delete_indicators
+from services.edit_service import PeriodTaken, RecordGone, update_indicator
 from services.import_service import ImportService
 from controllers.filter_controller import FilterController
 from forms.widgets.filter_widget import FilterWidget
 from forms.widgets.airport_filter_widget import AirportFilterWidget
 from forms.widgets.data_table_widget import DataTableWidget
 from forms.widgets.import_dialog import ENTITY_FROM_FILE, ImportDialog
+from forms.widgets.record_edit_dialog import RecordEditDialog
 from forms.widgets.reference_dialog import ReferenceDialog
 from forms.import_runner import ImportRunner
 from forms.table_export import export_table_to_excel
@@ -102,6 +104,7 @@ class MainWindow(QMainWindow):
         lay_a.addWidget(self.filter_widget_airline)
         self.table_widget_airline = DataTableWidget()
         self.table_widget_airline.delete_requested.connect(self.delete_records)
+        self.table_widget_airline.edit_requested.connect(self.edit_record)
         self.table_widget_airline.reload_requested.connect(self._reload_airline_tab)
         lay_a.addWidget(self.table_widget_airline)
 
@@ -114,6 +117,7 @@ class MainWindow(QMainWindow):
         lay_p.addWidget(self.airport_filter_widget)
         self.table_widget_airport = DataTableWidget()
         self.table_widget_airport.delete_requested.connect(self.delete_records)
+        self.table_widget_airport.edit_requested.connect(self.edit_record)
         self.table_widget_airport.reload_requested.connect(self._reload_airport_tab)
         lay_p.addWidget(self.table_widget_airport)
 
@@ -307,6 +311,76 @@ class MainWindow(QMainWindow):
             header_groups=groups,
             header=tw.export_header(user=getattr(self.current_user, "username", None)),
         )
+
+    def edit_record(self, row):
+        """Правка записи: диалог и итог. Копию, изменение и журнал ведёт служба (ARCH-16)."""
+        dialog = RecordEditDialog(row, self)
+        if dialog.exec() != RecordEditDialog.DialogCode.Accepted:
+            return
+
+        result = self._edit(
+            row.id, month=dialog.month(), year=dialog.year(), value=dialog.value(),
+            require_backup=True,
+        )
+        if result is None:
+            return
+
+        if not result.changed:
+            QMessageBox.information(self, "Готово", "Запись оставлена без изменений.")
+            return
+
+        note = (f"\nКопия базы: {result.backup.name}" if result.backup
+                else "\nКопия базы не снята.")
+        QMessageBox.information(self, "Готово", f"Запись изменена.{note}")
+        # Перечитывание за пределами обработки ошибок: правка уже состоялась, и
+        # назвать её неудачей из-за сбоя перерисовки значило бы соврать.
+        self._load_initial_data()
+
+    def _edit(self, record_id: int, *, month, year, value, require_backup: bool):
+        """Правка через службу. None — не состоялась, причина уже показана."""
+        try:
+            return update_indicator(
+                self._entity_type(),
+                record_id,
+                month=month,
+                year=year,
+                value=value,
+                user=getattr(self.current_user, "username", None),
+                require_backup=require_backup,
+            )
+        except BackupUnavailable as error:
+            # Копия снимается до изменения, поэтому сейчас ещё ничего не изменено
+            # и решение принадлежит человеку, а не журналу приложения (FUNC-13).
+            if not self._agrees_to_edit_without_backup(error):
+                return None
+            return self._edit(record_id, month=month, year=year, value=value,
+                              require_backup=False)
+        except PeriodTaken as error:
+            # Не ошибка программы, а занятый период: ключ отчётной строки —
+            # показатель, предприятие, месяц и год.
+            QMessageBox.warning(self, "Период занят", str(error))
+            return None
+        except RecordGone:
+            QMessageBox.warning(
+                self, "Записи больше нет",
+                "Эту запись уже удалили. Обновите таблицу.",
+            )
+            return None
+        except Exception as error:
+            log.exception("Не удалось изменить запись")
+            QMessageBox.critical(self, "Ошибка", f"Ошибка правки: {error}")
+            return None
+
+    def _agrees_to_edit_without_backup(self, error: Exception) -> bool:
+        """Вопрос вместо молчания. По умолчанию — «нет»: прежнее значение не вернуть."""
+        return QMessageBox.question(
+            self, "Копию базы снять не удалось",
+            f"Не удалось снять копию базы:\n{error}\n\n"
+            "Если изменить сейчас, прежнее значение восстановить будет нечем.\n"
+            "Изменить всё равно?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        ) == QMessageBox.StandardButton.Yes
 
     def delete_records(self, ids_to_delete: list):
         """Удаление записей: вопрос и итог. Копию, удаление и журнал ведёт служба (ARCH-16)."""

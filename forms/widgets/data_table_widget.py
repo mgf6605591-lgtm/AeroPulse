@@ -19,16 +19,27 @@ from utils.constants import (
 )
 
 
-# Причины, по которым удалять сейчас нечего. Показываются подсказкой на самой
-# кнопке: недоступное действие остаётся видимым и объясняет, чего ему не хватает.
+# Причины, по которым удалять или править сейчас нечего. Показываются подсказкой
+# на самой кнопке: недоступное действие остаётся видимым и объясняет, чего ему не
+# хватает.
 REASON_PIVOT = "Удаление доступно в подробном режиме: в сводной таблице строка — это сумма, а не запись."
 REASON_NO_SELECTION = "Выделите строки, которые нужно удалить."
+REASON_EDIT_PIVOT = (
+    "Правка доступна в подробном режиме: в сводной таблице строка — это сумма, а не запись."
+)
+REASON_EDIT_NO_SELECTION = "Выделите строку, которую нужно изменить."
+# Правка идёт по одной записи: диалог показывает её показатель, период и
+# значение, а у двух выделенных строк они разные.
+REASON_EDIT_MANY = "Выделите одну строку: записи правятся по одной."
 
 
 class DataTableWidget(QWidget):
     """Виджет таблицы данных"""
 
     delete_requested = pyqtSignal(list)
+    # Правку, как и удаление, виджет не выполняет сам: он называет запись, а
+    # диалог, копию базы и журнал ведёт окно (ARCH-10, ARCH-16).
+    edit_requested = pyqtSignal(object)
     # О смене режима отображения виджет сообщает сигналом, как и об удалении.
     # Прежде он звал метод родителя напрямую, а зависимость устанавливалась
     # постфактум через `set_parent_window()` и проверялась `hasattr` (ARCH-10).
@@ -57,12 +68,19 @@ class DataTableWidget(QWidget):
         self.radio_pivot = QRadioButton("Сводный (pivot)")
         self.radio_pivot.setChecked(True)
 
-        self.radio_detail = QRadioButton("Подробный (с удалением)")
+        # Подпись называет то, что в этом режиме можно делать со строкой: раньше
+        # это было только удаление.
+        self.radio_detail = QRadioButton("Подробный (правка и удаление)")
         # Сигнал подключён только к одной кнопке: `toggled` испускается и у
         # включаемой, и у выключаемой, поэтому подписка на обе давала два вызова
         # на один клик — и две полных перезагрузки отчёта (BUG-24).
         self.radio_detail.toggled.connect(self._on_view_toggle)
         
+        self.edit_btn = QPushButton("Редактировать выбранное")
+        self.edit_btn.clicked.connect(self._on_edit_clicked)
+        self.edit_btn.setEnabled(False)
+        self.edit_btn.setToolTip(REASON_EDIT_PIVOT)
+
         self.delete_btn = QPushButton("Удалить выбранное")
         self.delete_btn.clicked.connect(self._on_delete_clicked)
         self.delete_btn.setEnabled(False)
@@ -71,6 +89,7 @@ class DataTableWidget(QWidget):
         mode_layout.addWidget(self.radio_pivot)
         mode_layout.addWidget(self.radio_detail)
         mode_layout.addStretch()
+        mode_layout.addWidget(self.edit_btn)
         mode_layout.addWidget(self.delete_btn)
         layout.addWidget(mode_box)
         
@@ -82,6 +101,9 @@ class DataTableWidget(QWidget):
         self.data_table.setSelectionMode(QAbstractItemView.SelectionMode.ExtendedSelection)
         self.data_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.data_table.customContextMenuRequested.connect(self._on_context_menu)
+        # Двойной клик — привычный способ открыть запись; кнопка рядом делает то
+        # же самое для тех, кто её ищет глазами.
+        self.data_table.doubleClicked.connect(self._on_row_double_clicked)
         
         self.grouped_header = MultiLevelHeaderView(self.data_table)
         self.data_table.setHorizontalHeader(self.grouped_header)
@@ -123,34 +145,48 @@ class DataTableWidget(QWidget):
         self.data_table.setModel(model)
         selection = self.data_table.selectionModel()
         if selection is not None:
-            selection.selectionChanged.connect(self._sync_delete_button)
+            selection.selectionChanged.connect(self._sync_row_buttons)
             selection.currentChanged.connect(self._on_current_changed)
         # Закреплена колонка только в своде: в подробной таблице первая колонка —
         # «ID», и держать её на виду незачем.
         self.frozen_column.set_enabled(self.current_view == VIEW_PIVOT)
-        self._sync_delete_button()
+        self._sync_row_buttons()
 
     def _on_current_changed(self, current, _previous):
         """Курсор не должен прятаться под закреплённой колонкой."""
         if current.isValid():
             self.frozen_column.keep_current_visible(current.column())
 
-    def _sync_delete_button(self, *_args):
-        """Доступность кнопки удаления и причина, по которой она недоступна.
+    def _sync_row_buttons(self, *_args):
+        """Доступность кнопок над строками и причины, по которым они недоступны.
 
-        Прежде кнопка включалась по одному только режиму: в подробном она была
-        нажимаема всегда, а нажатие без выделенных строк не делало ничего и
-        ничего не объясняло.
+        Прежде кнопка удаления включалась по одному только режиму: в подробном
+        она была нажимаема всегда, а нажатие без выделенных строк не делало
+        ничего и ничего не объясняло.
         """
         if self.current_view != VIEW_DETAIL:
             self.delete_btn.setEnabled(False)
             self.delete_btn.setToolTip(REASON_PIVOT)
+            self.edit_btn.setEnabled(False)
+            self.edit_btn.setToolTip(REASON_EDIT_PIVOT)
             return
 
-        selection = self.data_table.selectionModel()
-        selected = selection.selectedRows() if selection is not None else []
+        selected = self._selected_rows()
         self.delete_btn.setEnabled(bool(selected))
         self.delete_btn.setToolTip("" if selected else REASON_NO_SELECTION)
+
+        # Удалить можно пачку, править — только одну запись за раз.
+        self.edit_btn.setEnabled(len(selected) == 1)
+        if len(selected) == 1:
+            self.edit_btn.setToolTip("")
+        else:
+            self.edit_btn.setToolTip(
+                REASON_EDIT_MANY if selected else REASON_EDIT_NO_SELECTION
+            )
+
+    def _selected_rows(self) -> list:
+        selection = self.data_table.selectionModel()
+        return list(selection.selectedRows()) if selection is not None else []
 
     def _on_view_toggle(self):
         """Переключение режима отображения"""
@@ -170,10 +206,34 @@ class DataTableWidget(QWidget):
         if not idx.isValid():
             return
         menu = QMenu(self)
+        edit_act = QAction("Редактировать запись", self)
+        edit_act.triggered.connect(lambda: self._request_edit(idx.row()))
+        menu.addAction(edit_act)
         delete_act = QAction("Удалить запись", self)
         delete_act.triggered.connect(self._on_delete_clicked)
         menu.addAction(delete_act)
         menu.exec(self.data_table.viewport().mapToGlobal(pos))
+
+    def _on_row_double_clicked(self, index):
+        """Двойной клик по строке подробной таблицы открывает её на правку."""
+        if self.current_view != VIEW_DETAIL or not index.isValid():
+            return
+        self._request_edit(index.row())
+
+    def _on_edit_clicked(self):
+        """Правка выделенной строки. Выделены две — править нечего: неясно, какую."""
+        if self.current_view != VIEW_DETAIL:
+            return
+        selected = self._selected_rows()
+        if len(selected) != 1:
+            return
+        self._request_edit(selected[0].row())
+
+    def _request_edit(self, row: int):
+        """Называет запись окну. Строка могла уехать перезагрузкой — тогда молчим."""
+        record = self.detail_model.get_object_by_row(row)
+        if record is not None:
+            self.edit_requested.emit(record)
     
     def _on_delete_clicked(self):
         """Обработчик удаления"""
@@ -354,8 +414,8 @@ class DataTableWidget(QWidget):
         # нужны заново и модель выделения, и ширина первой колонки.
         self.frozen_column.sync()
 
-        # Перезагрузка снимает выделение — значит, удалять снова нечего.
-        self._sync_delete_button()
+        # Перезагрузка снимает выделение — значит, удалять и править снова нечего.
+        self._sync_row_buttons()
 
     def get_table_view(self) -> QTableView:
         """Возвращает виджет таблицы"""
