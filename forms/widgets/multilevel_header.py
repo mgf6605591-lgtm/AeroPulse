@@ -1,7 +1,66 @@
 # forms/widgets/multilevel_header.py
-from PyQt6.QtWidgets import QHeaderView
-from PyQt6.QtCore import Qt, QRect, QSize
-from PyQt6.QtGui import QPainter, QPalette
+from PyQt6.QtWidgets import QAbstractItemView, QHeaderView
+from PyQt6.QtCore import QEvent, Qt, QMetaObject, QRect, QSize
+from PyQt6.QtGui import QFontMetrics, QPainter, QPalette
+
+
+# Отступ подписи от боковых границ секции: вплотную к линии текст читается хуже,
+# и на эти пиксели уменьшается место, по которому подпись переносится.
+TEXT_MARGIN = 4
+# Запас по высоте, чтобы строки подписи не упирались в границы секции.
+TEXT_PADDING = 6
+
+
+def wrap_header_text(text: str, width: int, metrics) -> list[str]:
+    """Разбивает подпись на строки, каждая из которых влезает в `width` пикселей.
+
+    Заголовок обрезался по ширине колонки, и от названия предприятия оставалась
+    середина: «рное общество "Авиакомпания "». Перенос показывает название
+    целиком при любой ширине — ценой высоты шапки, которая под него растёт.
+
+    Слово, которое не помещается целиком (узкая колонка, длинное название),
+    разрывается по буквам: иначе «при любой ширине» не выполняется — такое слово
+    осталось бы обрезанным.
+
+    `metrics` — что угодно с методом `horizontalAdvance(str)`, обычно QFontMetrics.
+    """
+    text = str(text)
+    if width <= 0:
+        return [text]
+
+    lines: list[str] = []
+    for paragraph in text.split("\n"):
+        words = paragraph.split()
+        if not words:
+            lines.append("")
+            continue
+
+        current = ""
+        for word in words:
+            probe = f"{current} {word}" if current else word
+            if metrics.horizontalAdvance(probe) <= width:
+                current = probe
+                continue
+            if current:
+                lines.append(current)
+            *head, current = _split_word(word, width, metrics)
+            lines.extend(head)
+        lines.append(current)
+    return lines
+
+
+def _split_word(word: str, width: int, metrics) -> list[str]:
+    """Слово по кускам в ширину колонки; последний кусок — начало новой строки."""
+    parts: list[str] = []
+    current = ""
+    for char in word:
+        probe = current + char
+        if current and metrics.horizontalAdvance(probe) > width:
+            parts.append(current)
+            current = char
+        else:
+            current = probe
+    return parts + [current]
 
 
 class MultiLevelHeaderView(QHeaderView):
@@ -18,6 +77,22 @@ class MultiLevelHeaderView(QHeaderView):
         # центрируется по видимой части, а «видимая» — это не «в области
         # просмотра»: под накладкой её не видно (см. forms/widgets/frozen_column.py).
         self._left_cover = 0
+        # Высота, ниже которой шапка не опускается: накладке закреплённой колонки
+        # её задаёт настоящая таблица, иначе шапки будут разной высоты и строки
+        # под ними разъедутся (см. forms/widgets/frozen_column.py).
+        self._height_floor = 0
+        # Сколько строк занимает подпись при такой ширине. Высота шапки
+        # пересчитывается на каждый запрос размера — а это перенос всех подписей
+        # свода, где колонок бывает под сотню.
+        self._line_cache: dict[tuple[str, int], int] = {}
+        # Пересчёт высоты меняет геометрию секций, а та зовёт пересчёт: флаг
+        # разрывает круг.
+        self._updating_geometries = False
+
+        # Ширину тянут мышью, и от неё зависит, во сколько строк ляжет подпись:
+        # шапка обязана перемериться, иначе перенесённый текст окажется за её
+        # нижней границей.
+        self.sectionResized.connect(self._on_section_resized)
 
         # Секция не подсвечивается и не нажимается: `paintSection` ни разу не
         # обращается к базовой отрисовке, состояние секции в неё не входит.
@@ -40,10 +115,7 @@ class MultiLevelHeaderView(QHeaderView):
     def set_groups(self, groups: list[tuple[int, int, str]]):
         """groups = список кортежей (first_col, last_col_inclusive, label)."""
         self._groups = groups or []
-        self.updateGeometries()
-        viewport = self.viewport()
-        if viewport is not None:
-            viewport.update()
+        self._refresh_geometries()
 
     def set_left_cover(self, width: int):
         """Ширина накладки закреплённой колонки поверх левого края заголовка."""
@@ -61,11 +133,117 @@ class MultiLevelHeaderView(QHeaderView):
                 return g
         return None
 
+    def setModel(self, model):
+        """Новая модель — новые подписи, а значит и другая высота шапки.
+
+        Смену данных заголовок иначе не заметит: ширины остались прежними,
+        `sectionResized` не приходит, — и свод с длинными названиями предприятий
+        встал бы под шапку, померенную по коротким.
+        """
+        previous = self.model()
+        if previous is not None:
+            try:
+                previous.modelReset.disconnect(self._on_header_contents_changed)
+                previous.headerDataChanged.disconnect(self._on_header_contents_changed)
+            except TypeError:  # подписки не было — модель ставили не мы
+                pass
+
+        super().setModel(model)
+        self._line_cache.clear()
+        if model is not None:
+            model.modelReset.connect(self._on_header_contents_changed)
+            model.headerDataChanged.connect(self._on_header_contents_changed)
+
+    def _on_header_contents_changed(self, *_args) -> None:
+        self._refresh_geometries()
+
+    def set_height_floor(self, height: int) -> None:
+        """Не быть ниже этой высоты — для накладки закреплённой колонки."""
+        height = max(0, int(height))
+        if height == self._height_floor:
+            return
+        self._height_floor = height
+        self._refresh_geometries()
+
     def sizeHint(self) -> QSize:
         s = super().sizeHint()
+        height = s.height() + (self._group_height if self._groups else 0)
+        return QSize(s.width(), max(height, self.required_height()))
+
+    def required_height(self) -> int:
+        """Высота, при которой видна каждая подпись целиком, со всеми переносами."""
+        metrics = self.fontMetrics()
+        text_height = metrics.height()
+
+        model = self.model()
+        if model is not None:
+            for col in range(model.columnCount()):
+                if self.isSectionHidden(col):
+                    continue
+                lines = self._line_count(col, self.sectionSize(col), metrics)
+                text_height = max(text_height, lines * metrics.height())
+
+        height = text_height + TEXT_PADDING
         if self._groups:
-            return QSize(s.width(), s.height() + self._group_height)
-        return s
+            height += self._group_height
+        return max(height, self._height_floor)
+
+    def _line_count(self, logicalIndex: int, width: int, metrics: QFontMetrics) -> int:
+        text = self._section_text(logicalIndex)
+        if not text:
+            return 1
+        key = (text, max(0, width - 2 * TEXT_MARGIN))
+        cached = self._line_cache.get(key)
+        if cached is None:
+            cached = len(wrap_header_text(text, key[1], metrics))
+            # Ключей столько, сколько пар «подпись — ширина»; за долгую сессию с
+            # разными сводами их набирается неограниченно много.
+            if len(self._line_cache) > 4096:
+                self._line_cache.clear()
+            self._line_cache[key] = cached
+        return cached
+
+    def _section_text(self, logicalIndex: int) -> str:
+        model = self.model()
+        if model is None:
+            return ""
+        text = model.headerData(logicalIndex, Qt.Orientation.Horizontal,
+                                Qt.ItemDataRole.DisplayRole)
+        return "" if text is None else str(text)
+
+    def _on_section_resized(self, *_args) -> None:
+        self._refresh_geometries()
+
+    def changeEvent(self, event):
+        """Сменился шрифт — прежние переносы посчитаны не по нему."""
+        if event is not None and event.type() == QEvent.Type.FontChange:
+            self._line_cache.clear()
+            self._refresh_geometries()
+        super().changeEvent(event)
+
+    def _refresh_geometries(self) -> None:
+        """Перемерить шапку: подписи или ширины изменились."""
+        if self._updating_geometries:
+            return
+        self._updating_geometries = True
+        try:
+            self.updateGeometries()
+
+            # Свою высоту заголовок не выбирает: её ставит таблица, и спрашивает
+            # `sizeHint` она только когда перестраивает себя сама — от смены
+            # ширины колонки, но не от смены подписей. Без этого толчка перенос
+            # был бы посчитан, а места под него не появилось бы.
+            # `updateGeometries` у QAbstractItemView — слот, поэтому зовётся по
+            # имени, минуя `protected`.
+            view = self.parentWidget()
+            if isinstance(view, QAbstractItemView):
+                QMetaObject.invokeMethod(view, "updateGeometries")
+        finally:
+            self._updating_geometries = False
+
+        viewport = self.viewport()
+        if viewport is not None:
+            viewport.update()
 
     def sectionSizeFromContents(self, logicalIndex: int) -> QSize:
         s = super().sectionSizeFromContents(logicalIndex)
@@ -143,12 +321,28 @@ class MultiLevelHeaderView(QHeaderView):
         painter.setPen(palette.color(QPalette.ColorRole.Mid))
         painter.drawRect(rect.adjusted(0, 0, -1, -1))
 
-        model = self.model()
-        text = model.headerData(logicalIndex, Qt.Orientation.Horizontal,
-                                Qt.ItemDataRole.DisplayRole) if model else None
+        text = self._section_text(logicalIndex)
         if text:
             painter.setPen(palette.color(QPalette.ColorRole.ButtonText))
-            painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, str(text))
+            self._draw_wrapped(painter, rect, text)
+
+    def _draw_wrapped(self, painter: QPainter, rect: QRect, text: str):
+        """Подпись в несколько строк по центру секции.
+
+        Раньше здесь был `drawText` с `AlignCenter`: одна строка, а всё, что не
+        влезло в ширину колонки, просто обрезалось по её границам.
+        """
+        metrics = painter.fontMetrics()
+        inner = rect.adjusted(TEXT_MARGIN, 0, -TEXT_MARGIN, 0)
+        lines = wrap_header_text(text, inner.width(), metrics)
+        line_height = metrics.height()
+
+        top = inner.y() + max(0, (inner.height() - line_height * len(lines)) // 2)
+        for offset, line in enumerate(lines):
+            painter.drawText(
+                QRect(inner.x(), top + offset * line_height, inner.width(), line_height),
+                Qt.AlignmentFlag.AlignCenter, line,
+            )
 
     def _paint_group_header(self, painter: QPainter, rect: QRect, label: str):
         """Отрисовка заголовка группы."""
@@ -164,12 +358,19 @@ class MultiLevelHeaderView(QHeaderView):
         painter.setPen(border_color)
         painter.drawRect(rect.adjusted(0, 0, -1, -1))
         
-        # Рисуем текст (жирный шрифт)
+        # Рисуем текст (жирный шрифт). Шрифт возвращается обратно: painter один
+        # на всю отрисовку, и жирное начертание досталось бы подписям колонок,
+        # которые рисуются следующими, — а меряются они обычным шрифтом.
+        painter.save()
         painter.setPen(text_color)
         font = painter.font()
         font.setBold(True)
         painter.setFont(font)
+        # Подпись группы — в одну строку: полоса групп фиксированной высоты, и
+        # перенос вылез бы поверх названий колонок. Места ей хватает: группа —
+        # это месяц над несколькими колонками, а не одна узкая колонка.
         painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, label)
+        painter.restore()
 
     def get_groups(self) -> list[tuple[int, int, str]]:
         """Копия групп заголовка (first_col, last_col, подпись) для экспорта в XLSX."""

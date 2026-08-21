@@ -18,6 +18,7 @@
 """
 from typing import TypeVar
 
+from PyQt6 import sip
 from PyQt6.QtCore import QEvent, QObject, Qt
 from PyQt6.QtWidgets import QAbstractItemView, QTableView
 
@@ -88,6 +89,10 @@ class FrozenFirstColumn(QObject):
 
     def _connect(self) -> None:
         self._table_header.sectionResized.connect(self._on_table_column_resized)
+        # Шапка настоящей таблицы растёт, когда длинная подпись переносится на
+        # несколько строк, — накладка обязана вырасти вместе с ней, иначе строки
+        # под двумя шапками разной высоты разъедутся.
+        self._table_header.geometriesChanged.connect(self._update_geometry)
         self._table_rows.sectionResized.connect(self._on_row_resized)
         self._header.sectionResized.connect(self._on_frozen_column_resized)
 
@@ -190,8 +195,24 @@ class FrozenFirstColumn(QObject):
             width = self._table.columnWidth(0) if self._enabled else 0
             self._table_header.set_left_cover(width)
 
+    def _match_header_height(self) -> None:
+        """Шапка накладки — той же высоты, что и шапка таблицы.
+
+        Сама она мерит одну колонку и вышла бы ниже: перенос длинных подписей
+        поднимает высоту по самой высокой колонке свода, а их накладка не видит.
+        Берётся вычисленная высота, а не текущая: на этот момент таблица ещё не
+        успела применить новую.
+        """
+        if isinstance(self._table_header, MultiLevelHeaderView):
+            self._header.set_height_floor(self._table_header.required_height())
+
     def _update_geometry(self) -> None:
+        # Заголовок сообщает о смене геометрии и в тот момент, когда таблицу уже
+        # сносят: обращение к ней оттуда падает на удалённом объекте.
+        if sip.isdeleted(self._table):
+            return
         self._report_cover()
+        self._match_header_height()
         frame = self._table.frameWidth()
         # `isHidden`, а не `isVisible`: пока окно не показано, видимым не
         # считается ни один дочерний виджет, и номера строк съели бы отступ.
