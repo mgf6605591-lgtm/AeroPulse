@@ -28,6 +28,7 @@ from utils.constants import (
     GA12_CODES_BY_SECTION,
     GA12_CODE_ORDER_FLAT,
     GA12_DETAIL_TON_CODES,
+    GA12_GRAND_TOTAL_HEADER,
     GA12_SECTION_TITLE,
     GA12_SUBHEADING_VTOM,
     GA12_TON_PARENT_CODES,
@@ -37,6 +38,11 @@ from utils.constants import (
     ROUTE_TYPE_NAMES,
 )
 from utils.ga12_layout import ga12_total_route_types
+
+
+# Ключ крайней правой колонки общего свода. Под группу месяца он не подходит:
+# у тех ключи начинаются с `m_<период>_`.
+GA12_GRAND_TOTAL_KEY = "grand_total"
 
 
 def _route_type_keys_for_total_sum(selected_route_type_names: list[str]) -> set[str]:
@@ -156,16 +162,25 @@ def _emit_vtom_before_row(
 
 
 def _fill_airline_columns(row, periods, airlines, by_period) -> None:
-    """Колонки свода по всем АК: «Свод» за период и по колонке на предприятие."""
+    """Колонки свода по всем АК: «Свод» за период, предприятия и общий «Итого».
+
+    «Свод» — итог месяца по выбранным авиакомпаниям, `grand_total` — тот же итог
+    за все показанные месяцы разом. Складываются они из одних и тех же значений,
+    поэтому и считаются в одном обходе: иначе крайняя правая колонка могла бы
+    разойтись с суммой колонок «Свод» у себя же в строке.
+    """
+    grand_total = Decimal("0")
     for period in periods:
         period_data = by_period.get(period, {})
         pk = period_col_key(period)
         total = Decimal("0")
         for airline in airlines:
             total += period_data.get(airline, Decimal("0"))
+        grand_total += total
         row[f"m_{pk}_total"] = dec_to_float(total)
         for index, airline in enumerate(airlines):
             row[f"m_{pk}_a_{index}"] = dec_to_float(period_data.get(airline, Decimal("0")))
+    row[GA12_GRAND_TOTAL_KEY] = dec_to_float(grand_total)
 
 
 def _emit_form_rows(keys, code_to_indicator, fill_cells, vtom_context=None) -> list[dict[str, Any]]:
@@ -321,6 +336,12 @@ def all_airlines(filters: ReportFilters) -> dict[str, Any]:
             col += 1
         last = col - 1
         groups.append((first, last, period_label(period)))
+
+    # Общий итог — крайняя правая колонка и вне групп месяцев: он относится ко
+    # всей строке сразу, а не к одному из периодов. Заголовок без группы над ним
+    # рисуется на всю высоту шапки (см. forms/widgets/multilevel_header.py).
+    headers.append(GA12_GRAND_TOTAL_HEADER)
+    keys.append(GA12_GRAND_TOTAL_KEY)
 
     known_codes = set(GA12_CODE_ORDER_FLAT)
 

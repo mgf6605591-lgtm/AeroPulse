@@ -173,5 +173,81 @@ class FilteredTotalsTest(PivotCase):
         self.assertEqual(BLANK_LOCAL, row["m_2025_January_total"])
 
 
+class GrandTotalColumnTest(PivotCase):
+    """Крайняя правая колонка «Итого» общего свода по всем авиакомпаниям.
+
+    Колонки «Свод» дают итог по выбранным а/к внутри месяца, но за все месяцы
+    сразу итога не было: чтобы сложить год, приходилось складывать колонки
+    глазами. «Итого» стоит вне групп месяцев и относится ко всей строке.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.records = blank_row_records()
+
+    def two_months_two_airlines(self):
+        return (
+            blank_row_records(month="January")
+            + blank_row_records(month="February")
+            + blank_row_records(month="January", airline=("Вторая АК", 2))
+            + blank_row_records(month="February", airline=("Вторая АК", 2))
+        )
+
+    def test_column_is_the_rightmost_one(self):
+        result = self.build_all_airlines(self.records)
+
+        self.assertEqual("Итого", result["headers"][-1])
+        self.assertEqual("grand_total", result["keys"][-1])
+
+    def test_column_is_outside_the_month_groups(self):
+        """Иначе подпись месяца растянулась бы и на общий итог."""
+        result = self.build_all_airlines(self.records)
+
+        last = len(result["headers"]) - 1
+        self.assertFalse([g for g in result["groups"] if g[0] <= last <= g[1]])
+
+    def test_it_sums_every_month_and_every_airline(self):
+        result = self.build_all_airlines(self.two_months_two_airlines())
+
+        row = self.row_for_code(result, "965")
+        self.assertEqual(BLANK_TOTAL * 4, row["grand_total"])
+
+    def test_it_equals_the_sum_of_the_summary_columns(self):
+        """Итог не пересчитывается по-своему: он равен сумме колонок «Свод»."""
+        result = self.build_all_airlines(self.two_months_two_airlines())
+
+        row = self.row_for_code(result, "965")
+        by_month = sum(
+            row[key] for key in result["keys"]
+            if key.startswith("m_") and key.endswith("_total")
+        )
+        self.assertEqual(by_month, row["grand_total"])
+
+    def test_nested_route_types_are_not_counted_twice(self):
+        """Местные входят во внутренние — как и в колонках «Свод» (BUG-2)."""
+        result = self.build_all_airlines(self.records)
+
+        row = self.row_for_code(result, "965")
+        self.assertEqual(BLANK_TOTAL, row["grand_total"])
+
+    def test_section_heading_row_keeps_the_cell_empty(self):
+        result = self.build_all_airlines(self.records)
+
+        headings = [r for r in result["rows"] if str(r["indicator"]).startswith("—")]
+        self.assertTrue(headings)
+        for row in headings:
+            self.assertIsNone(row["grand_total"])
+
+    def test_other_layouts_do_not_get_the_column(self):
+        """Итог просили в общем своде: остальные виды таблицы не трогаем."""
+        for build in (
+            self.build_per_airline_by_routes,
+            self.build_per_airline_summary,
+            self.build_multi_airline_by_routes,
+        ):
+            with self.subTest(build=build.__name__):
+                self.assertNotIn("grand_total", build(self.records)["keys"])
+
+
 if __name__ == "__main__":
     unittest.main()

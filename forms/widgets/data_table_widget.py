@@ -9,6 +9,7 @@ from controllers.data_controller import DataController
 from controllers.export_header import ExportHeader, build_export_header
 from controllers.report_filters import NO_FILTERS, ReportFilters
 from utils.constants import (
+    GA12_GRAND_TOTAL_HEADER,
     GA12_TOTAL_HEADER,
     MODE_AIRLINE,
     ROUTE_TYPE_NAMES,
@@ -206,6 +207,7 @@ class DataTableWidget(QWidget):
             'Свод': 100,
             'Всего': 100,
             GA12_TOTAL_HEADER: 100,
+            GA12_GRAND_TOTAL_HEADER: 110,
         }
 
         # Типы маршрутов для одной авиакомпании. Подписи берутся из констант, а не
