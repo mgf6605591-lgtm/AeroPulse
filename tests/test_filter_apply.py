@@ -157,15 +157,19 @@ class ViewToggleTest(unittest.TestCase):
 
         self.assertEqual(1, len(self.reloads))
 
-    def test_view_and_delete_button_follow_the_mode(self):
+    def test_view_follows_the_mode(self):
         from utils.constants import VIEW_DETAIL, VIEW_PIVOT
 
         self.widget.radio_detail.setChecked(True)
         self.assertEqual(VIEW_DETAIL, self.widget.current_view)
-        self.assertTrue(self.widget.delete_btn.isEnabled())
 
         self.widget.radio_pivot.setChecked(True)
         self.assertEqual(VIEW_PIVOT, self.widget.current_view)
+
+    def test_delete_button_needs_a_selection_too(self):
+        """Подробный режим сам по себе кнопку не включает: удалять нечего."""
+        self.widget.radio_detail.setChecked(True)
+
         self.assertFalse(self.widget.delete_btn.isEnabled())
 
 

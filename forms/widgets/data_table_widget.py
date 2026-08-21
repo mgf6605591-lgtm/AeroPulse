@@ -17,9 +17,15 @@ from utils.constants import (
 )
 
 
+# Причины, по которым удалять сейчас нечего. Показываются подсказкой на самой
+# кнопке: недоступное действие остаётся видимым и объясняет, чего ему не хватает.
+REASON_PIVOT = "Удаление доступно в подробном режиме: в сводной таблице строка — это сумма, а не запись."
+REASON_NO_SELECTION = "Выделите строки, которые нужно удалить."
+
+
 class DataTableWidget(QWidget):
     """Виджет таблицы данных"""
-    
+
     delete_requested = pyqtSignal(list)
     # О смене режима отображения виджет сообщает сигналом, как и об удалении.
     # Прежде он звал метод родителя напрямую, а зависимость устанавливалась
@@ -58,7 +64,8 @@ class DataTableWidget(QWidget):
         self.delete_btn = QPushButton("Удалить выбранное")
         self.delete_btn.clicked.connect(self._on_delete_clicked)
         self.delete_btn.setEnabled(False)
-        
+        self.delete_btn.setToolTip(REASON_PIVOT)
+
         mode_layout.addWidget(self.radio_pivot)
         mode_layout.addWidget(self.radio_detail)
         mode_layout.addStretch()
@@ -98,20 +105,48 @@ class DataTableWidget(QWidget):
         self.pivot_model = PivotDictModel()
         self.detail_model = SQLAlchemyTableModel()
         self.data_controller.set_models(self.pivot_model, self.detail_model)
-        self.data_table.setModel(self.pivot_model)
-    
+        self._set_table_model(self.pivot_model)
+
+    def _set_table_model(self, model):
+        """Меняет модель таблицы и пересоздаёт подписку на выделение.
+
+        `setModel()` заводит таблице новую модель выделения и выбрасывает
+        прежнюю вместе с подписками, поэтому подключаться к ней нужно после
+        каждой смены, а не один раз в конструкторе.
+        """
+        self.data_table.setModel(model)
+        selection = self.data_table.selectionModel()
+        if selection is not None:
+            selection.selectionChanged.connect(self._sync_delete_button)
+        self._sync_delete_button()
+
+    def _sync_delete_button(self, *_args):
+        """Доступность кнопки удаления и причина, по которой она недоступна.
+
+        Прежде кнопка включалась по одному только режиму: в подробном она была
+        нажимаема всегда, а нажатие без выделенных строк не делало ничего и
+        ничего не объясняло.
+        """
+        if self.current_view != VIEW_DETAIL:
+            self.delete_btn.setEnabled(False)
+            self.delete_btn.setToolTip(REASON_PIVOT)
+            return
+
+        selection = self.data_table.selectionModel()
+        selected = selection.selectedRows() if selection is not None else []
+        self.delete_btn.setEnabled(bool(selected))
+        self.delete_btn.setToolTip("" if selected else REASON_NO_SELECTION)
+
     def _on_view_toggle(self):
         """Переключение режима отображения"""
         if self.radio_pivot.isChecked():
             self.current_view = VIEW_PIVOT
-            self.data_table.setModel(self.pivot_model)
-            self.delete_btn.setEnabled(False)
+            self._set_table_model(self.pivot_model)
         else:
             self.current_view = VIEW_DETAIL
-            self.data_table.setModel(self.detail_model)
-            self.delete_btn.setEnabled(True)
+            self._set_table_model(self.detail_model)
         self.reload_requested.emit()
-    
+
     def _on_context_menu(self, pos):
         """Контекстное меню"""
         if self.current_view != VIEW_DETAIL:
@@ -296,7 +331,10 @@ class DataTableWidget(QWidget):
             
             # Установка ширины столбцов для подробной таблицы
             self._set_column_widths_detail(data['headers'])
-    
+
+        # Перезагрузка снимает выделение — значит, удалять снова нечего.
+        self._sync_delete_button()
+
     def get_table_view(self) -> QTableView:
         """Возвращает виджет таблицы"""
         return self.data_table
