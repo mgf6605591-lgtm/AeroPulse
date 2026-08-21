@@ -77,8 +77,9 @@ class DeletionCase(MigratedDbCase):
             patcher.start()
             self.addCleanup(patcher.stop)
 
-        # Копия снимается с того файла, который назовёт db_path().
-        path_patch = patch("services.deletion_service.db_path", lambda: Path(self.db_path))
+        # Копия снимается с того файла, который назовёт db_path(); снимает её
+        # общая с правкой обвязка — `services/indicator_records.py`.
+        path_patch = patch("services.indicator_records.db_path", lambda: Path(self.db_path))
         path_patch.start()
         self.addCleanup(path_patch.stop)
 
@@ -150,7 +151,7 @@ class BackupTest(DeletionCase):
 
     def test_backup_failure_stops_the_deletion(self):
         """FUNC-13: прежде неудача уходила в журнал приложения, а удаление шло."""
-        with patch("services.deletion_service.make_backup", side_effect=OSError("нет места")):
+        with patch("services.indicator_records.make_backup", side_effect=OSError("нет места")):
             with self.assertRaises(BackupUnavailable):
                 delete_indicators("airline", [1])
 
@@ -159,7 +160,7 @@ class BackupTest(DeletionCase):
 
     def test_the_reason_travels_with_the_refusal(self):
         """Вызывающему нужно назвать причину человеку, а не «что-то пошло не так»."""
-        with patch("services.deletion_service.make_backup", side_effect=OSError("нет места")):
+        with patch("services.indicator_records.make_backup", side_effect=OSError("нет места")):
             with self.assertRaises(BackupUnavailable) as caught:
                 delete_indicators("airline", [1])
 
@@ -167,7 +168,7 @@ class BackupTest(DeletionCase):
 
     def test_an_explicit_waiver_lets_the_deletion_through(self):
         """Так окно поступает, когда человек ответил «удалять всё равно»."""
-        with patch("services.deletion_service.make_backup", side_effect=OSError("нет места")):
+        with patch("services.indicator_records.make_backup", side_effect=OSError("нет места")):
             result = delete_indicators("airline", [1], require_backup=False)
 
         self.assertIsNone(result.backup)
@@ -176,7 +177,7 @@ class BackupTest(DeletionCase):
 
     def test_waived_backup_is_named_in_the_journal(self):
         """Иначе по журналу не отличить удаление с копией от удаления без неё."""
-        with patch("services.deletion_service.make_backup", side_effect=OSError("нет места")):
+        with patch("services.indicator_records.make_backup", side_effect=OSError("нет места")):
             delete_indicators("airline", [1], require_backup=False)
 
         (row,) = self.journal_rows()
@@ -184,7 +185,7 @@ class BackupTest(DeletionCase):
 
     def test_nothing_to_copy_is_not_a_failure(self):
         """Базы нет — копировать нечего и удалять нечего; это не отказ копирования."""
-        with patch("services.deletion_service.make_backup", return_value=None):
+        with patch("services.indicator_records.make_backup", return_value=None):
             result = delete_indicators("airline", [1])
 
         self.assertIsNone(result.backup)

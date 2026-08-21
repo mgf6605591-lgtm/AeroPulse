@@ -28,7 +28,10 @@ except ImportError:  # PyQt6 отсутствует — проверки Qt пр
 _app = None
 
 # Подписи, которые Qt ставит стандартным кнопкам сама.
-QT_DEFAULT_CAPTIONS = {"OK", "Cancel", "Close", "&OK", "&Cancel", "&Close"}
+QT_DEFAULT_CAPTIONS = {
+    "OK", "Cancel", "Close", "Save",
+    "&OK", "&Cancel", "&Close", "&Save",
+}
 
 
 def setUpModule():
@@ -150,6 +153,19 @@ class DialogCaptionsAreRussianTest(unittest.TestCase):
         from forms.widgets.period_dialog import PeriodDialog
 
         self.assertNoQtCaptions(PeriodDialog("отчёт.xlsx"))
+
+    def test_record_edit_dialog(self):
+        from decimal import Decimal
+
+        from controllers.detail_rows import DetailRow
+        from db.models.enums import Months
+        from forms.widgets.record_edit_dialog import RecordEditDialog
+
+        row = DetailRow(
+            id=1, entity_name="АК", entity_code="AAA", indicator="Налет часов",
+            measure="час.", month=Months.January, year=2025, value=Decimal("1"),
+        )
+        self.assertNoQtCaptions(RecordEditDialog(row))
 
     def test_multi_select_dialog(self):
         from forms.widgets.multi_select_filter_button import MultiSelectDialog
