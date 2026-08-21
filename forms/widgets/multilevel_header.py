@@ -14,6 +14,10 @@ class MultiLevelHeaderView(QHeaderView):
         super().__init__(Qt.Orientation.Horizontal, parent)
         self._groups: list[tuple[int, int, str]] = []
         self._group_height = 26
+        # Сколько пикселей слева перекрыто закреплённой колонкой. Подпись группы
+        # центрируется по видимой части, а «видимая» — это не «в области
+        # просмотра»: под накладкой её не видно (см. forms/widgets/frozen_column.py).
+        self._left_cover = 0
 
         # Секция не подсвечивается и не нажимается: `paintSection` ни разу не
         # обращается к базовой отрисовке, состояние секции в неё не входит.
@@ -37,6 +41,16 @@ class MultiLevelHeaderView(QHeaderView):
         """groups = список кортежей (first_col, last_col_inclusive, label)."""
         self._groups = groups or []
         self.updateGeometries()
+        viewport = self.viewport()
+        if viewport is not None:
+            viewport.update()
+
+    def set_left_cover(self, width: int):
+        """Ширина накладки закреплённой колонки поверх левого края заголовка."""
+        width = max(0, int(width))
+        if width == self._left_cover:
+            return
+        self._left_cover = width
         viewport = self.viewport()
         if viewport is not None:
             viewport.update()
@@ -109,8 +123,9 @@ class MultiLevelHeaderView(QHeaderView):
 
         group_rect = QRect(start_pos, top, end_pos - start_pos, self._group_height)
         viewport = self.viewport()
+        width = viewport.width() if viewport else 0
         visible = group_rect.intersected(
-            QRect(0, top, viewport.width() if viewport else 0, self._group_height)
+            QRect(self._left_cover, top, max(0, width - self._left_cover), self._group_height)
         )
         return visible if not visible.isEmpty() else None
 

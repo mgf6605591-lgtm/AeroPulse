@@ -4,6 +4,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QAction, QKeySequence, QShortcut
 from forms.models.sqlalchemy_table_model import SQLAlchemyTableModel
 from forms.models.pivot_dict_model import PivotDictModel
+from forms.widgets.frozen_column import FrozenFirstColumn
 from forms.widgets.multilevel_header import MultiLevelHeaderView
 from controllers.data_controller import DataController
 from controllers.export_header import ExportHeader, build_export_header
@@ -85,6 +86,10 @@ class DataTableWidget(QWidget):
         self.grouped_header = MultiLevelHeaderView(self.data_table)
         self.data_table.setHorizontalHeader(self.grouped_header)
         self.grouped_header.setStretchLastSection(True)
+
+        # Первая колонка свода — «Показатель» (в 15-ГА — аэропорт): без неё
+        # числа справа не к чему отнести, а уезжает она первой же прокруткой.
+        self.frozen_column = FrozenFirstColumn(self.data_table)
         layout.addWidget(self.data_table)
         
         # Shortcut для Delete — только при фокусе внутри своей таблицы.
@@ -119,7 +124,16 @@ class DataTableWidget(QWidget):
         selection = self.data_table.selectionModel()
         if selection is not None:
             selection.selectionChanged.connect(self._sync_delete_button)
+            selection.currentChanged.connect(self._on_current_changed)
+        # Закреплена колонка только в своде: в подробной таблице первая колонка —
+        # «ID», и держать её на виду незачем.
+        self.frozen_column.set_enabled(self.current_view == VIEW_PIVOT)
         self._sync_delete_button()
+
+    def _on_current_changed(self, current, _previous):
+        """Курсор не должен прятаться под закреплённой колонкой."""
+        if current.isValid():
+            self.frozen_column.keep_current_visible(current.column())
 
     def _sync_delete_button(self, *_args):
         """Доступность кнопки удаления и причина, по которой она недоступна.
@@ -281,6 +295,7 @@ class DataTableWidget(QWidget):
             data = self.data_controller.load_pivot_data(mode, filters, entity_id)
             self.pivot_model.set_source_data(data['rows'], data['headers'], data['keys'])
             self.grouped_header.set_groups(data['groups'])
+            self.frozen_column.set_groups(data['groups'])
             
             stats = data['stats']
             self._last_stats = dict(stats)
@@ -327,12 +342,17 @@ class DataTableWidget(QWidget):
             self.detail_model.setColumnAttributes(data['attrs'])
             self.detail_model.set_source_data(data['records'])
             self.grouped_header.set_groups([])
+            self.frozen_column.set_groups([])
             # У подробной таблицы своего свода нет: считаем то, что в ней лежит.
             self._last_stats = {"records": len(data['records'])}
             self.data_count_label.setText(f"Записей: {len(data['records'])}")
             
             # Установка ширины столбцов для подробной таблицы
             self._set_column_widths_detail(data['headers'])
+
+        # Закреплённая колонка повторяет ту же модель: после смены данных ей
+        # нужны заново и модель выделения, и ширина первой колонки.
+        self.frozen_column.sync()
 
         # Перезагрузка снимает выделение — значит, удалять снова нечего.
         self._sync_delete_button()
