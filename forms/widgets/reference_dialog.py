@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import (
     QTableWidget, QTableWidgetItem, QTabWidget, QVBoxLayout, QWidget,
 )
 
+from forms.widgets.dialog_buttons import set_caption
 from services.reference_service import KINDS, Kind, ReferenceService, plural
 
 
@@ -64,6 +65,10 @@ class ReferenceEditor(QDialog):
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
+        # Подписи задаются свои: перевода Qt в сборке нет, и стандартные кнопки
+        # остаются английскими посреди русского окна.
+        set_caption(buttons, QDialogButtonBox.StandardButton.Ok, "Сохранить")
+        set_caption(buttons, QDialogButtonBox.StandardButton.Cancel, "Отмена")
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addRow(buttons)
@@ -265,6 +270,7 @@ class ReferenceDialog(QDialog):
         layout.addWidget(self.tabs)
 
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        set_caption(buttons, QDialogButtonBox.StandardButton.Close, "Закрыть")
         buttons.rejected.connect(self.reject)
         buttons.accepted.connect(self.accept)
         layout.addWidget(buttons)

@@ -15,6 +15,7 @@ from PyQt6.QtWidgets import (
     QTreeWidgetItem,
     QVBoxLayout,
 )
+from forms.widgets.dialog_buttons import set_caption
 
 # Раздел отделяется в названии показателя длинным тире с пробелами:
 # «Внутренние регулярные — Пассажиры отправленные, чел.». Разделитель ставит
@@ -108,6 +109,8 @@ class MultiSelectDialog(QDialog):
         box = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
+        set_caption(box, QDialogButtonBox.StandardButton.Ok, "Применить")
+        set_caption(box, QDialogButtonBox.StandardButton.Cancel, "Отмена")
         box.accepted.connect(self.accept)
         box.rejected.connect(self.reject)
         layout.addWidget(box)

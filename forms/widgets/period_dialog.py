@@ -53,6 +53,7 @@ class PeriodDialog(QDialog):
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
+        set_caption(buttons, QDialogButtonBox.StandardButton.Ok, "Принять период")
         set_caption(buttons, QDialogButtonBox.StandardButton.Cancel, "Пропустить файл")
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)

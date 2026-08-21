@@ -3,6 +3,7 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtWidgets import (
     QComboBox, QDialog, QDialogButtonBox, QFormLayout, QLabel, QMessageBox
 )
+from forms.widgets.dialog_buttons import set_caption
 
 
 # Признак того, что предприятие названо в самом файле. Отчёт 12-ГА называет свою
@@ -57,6 +58,8 @@ class ImportDialog(QDialog):
         
         # Кнопки
         buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel)
+        set_caption(buttons, QDialogButtonBox.StandardButton.Ok, "Импортировать")
+        set_caption(buttons, QDialogButtonBox.StandardButton.Cancel, "Отмена")
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         layout.addRow(buttons)
