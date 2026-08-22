@@ -29,6 +29,7 @@ from forms.widgets.data_table_widget import DataTableWidget
 from forms.widgets.import_dialog import ENTITY_FROM_FILE, ImportDialog
 from forms.widgets.record_edit_dialog import RecordEditDialog
 from forms.widgets.reference_dialog import ReferenceDialog
+from forms.widgets.scroll_host import HorizontalScrollHost
 from forms.import_runner import ImportRunner
 from forms.table_export import export_table_to_excel
 from utils.constants import MONTHS_RU, MODE_AIRLINE, MODE_AIRPORT
@@ -101,7 +102,7 @@ class MainWindow(QMainWindow):
         self.filter_widget_airline = FilterWidget()
         self.filter_widget_airline.filters_changed.connect(self._reload_airline_tab)
         self.filter_widget_airline.reset_requested.connect(self._on_reset_airline_filters)
-        lay_a.addWidget(self.filter_widget_airline)
+        lay_a.addWidget(HorizontalScrollHost(self.filter_widget_airline))
         self.table_widget_airline = DataTableWidget()
         self.table_widget_airline.delete_requested.connect(self.delete_records)
         self.table_widget_airline.edit_requested.connect(self.edit_record)
@@ -114,7 +115,7 @@ class MainWindow(QMainWindow):
         self.airport_filter_widget = AirportFilterWidget()
         self.airport_filter_widget.filters_changed.connect(self._reload_airport_tab)
         self.airport_filter_widget.reset_requested.connect(self._on_reset_airport_filters)
-        lay_p.addWidget(self.airport_filter_widget)
+        lay_p.addWidget(HorizontalScrollHost(self.airport_filter_widget))
         self.table_widget_airport = DataTableWidget()
         self.table_widget_airport.delete_requested.connect(self.delete_records)
         self.table_widget_airport.edit_requested.connect(self.edit_record)
