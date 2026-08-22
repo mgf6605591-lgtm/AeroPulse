@@ -11,10 +11,20 @@
 подписи остаются английскими: «Close» в окне справочников стояло посреди
 русского интерфейса. Перевод в сборку не входит, поэтому подписи задаются свои —
 `forms.widgets.dialog_buttons.set_caption` для того и заведён.
+
+Окно справочников при создании читает списки, поэтому у проверки подписей своя
+временная база. Без неё окно открывало рабочую db/database.db разработчика: на
+его машине таблицы есть и тест проходил, на чистой — «no such table», и падал
+только там.
 """
 
 import os
 import unittest
+from unittest.mock import patch
+
+from sqlalchemy.orm import sessionmaker
+
+from tests.support import MigratedDbCase
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -116,8 +126,15 @@ class DeleteButtonNeedsSelectionTest(unittest.TestCase):
 
 
 @unittest.skipUnless(HAS_QT, "PyQt6 не установлен")
-class DialogCaptionsAreRussianTest(unittest.TestCase):
+class DialogCaptionsAreRussianTest(MigratedDbCase):
     """Ни одной кнопки с подписью, которую поставила Qt."""
+
+    def setUp(self):
+        super().setUp()
+        session = sessionmaker(bind=self.engine, expire_on_commit=False)
+        patcher = patch("services.reference_service.get_session", session)
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def captions(self, widget) -> list[str]:
         found = []
