@@ -16,18 +16,14 @@
 класса и с теми же группами — иначе шапка над закреплённой колонкой оказалась бы
 другой высоты, и строки разъехались бы по вертикали.
 """
-from typing import TypeVar
-
 from PyQt6 import sip
 from PyQt6.QtCore import QEvent, QObject, Qt
 from PyQt6.QtWidgets import QAbstractItemView, QTableView
 
 from forms.widgets.multilevel_header import MultiLevelHeaderView
 
-T = TypeVar("T")
 
-
-def _part(part: T | None, name: str) -> T:
+def _part[T](part: T | None, name: str) -> T:
     """Часть таблицы, которую Qt заводит сама: заголовок, полоса, область.
 
     В описаниях типов PyQt6 все они `Optional`, хотя `QTableView` создаёт их в
