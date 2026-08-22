@@ -231,6 +231,23 @@ class Ga15BlankRulesTest(MigratedDbCase):
             result["formulas"].row_sums[self.line_index(result, "8")],
         )
 
+    def test_the_line_number_is_not_a_sum_of_line_numbers(self):
+        """Номер строки — имя строки, а не величина, и складывать его нечего.
+
+        Правило строки касается всех колонок сразу, и сверка сама по себе тут не
+        спасает: строка 03 подписана «(стр. 01+стр. 02)», и 1 + 2 сошлось ровно в
+        её собственный номер — в выгрузке он становился вычисляемым.
+        """
+        result = self.build()
+        rule = result["formulas"].operands(
+            self.line_index(result, "3"),
+            1,
+            GA15_KEYS[1],
+            {key: index for index, key in enumerate(GA15_KEYS)},
+        )
+
+        self.assertEqual((), rule)
+
     def test_line_04_stays_out_of_the_international_total(self):
         """«В том числе иностранными» — из строки 03, а не рядом с ней."""
         result = self.build()
@@ -238,6 +255,25 @@ class Ga15BlankRulesTest(MigratedDbCase):
         self.assertEqual(
             (self.line_index(result, "1"), self.line_index(result, "2")),
             result["formulas"].row_sums[self.line_index(result, "3")],
+        )
+
+
+class LabelColumnTest(unittest.TestCase):
+    """Колонка-подпись не складывается, даже когда сложение сошлось."""
+
+    RULE = PivotFormulas(
+        row_sums={2: (0, 1)}, label_keys=frozenset({"number"})
+    )
+    COLUMNS = {"number": 0, "value": 1}
+
+    def test_a_label_column_has_no_way_to_be_summed(self):
+        self.assertEqual(
+            (), self.RULE.operands(2, 0, "number", self.COLUMNS)
+        )
+
+    def test_the_value_column_beside_it_still_has_one(self):
+        self.assertEqual(
+            (((0, 1), (1, 1)),), self.RULE.operands(2, 1, "value", self.COLUMNS)
         )
 
 
