@@ -50,6 +50,8 @@ def _blank_formulas(row_by_code: dict[str, int]) -> PivotFormulas:
             for tag, parts in GA15_METRIC_SUMS.items()
         },
         row_sums=row_sums,
+        # Вид перевозок и номер строки — подписи бланка, а не его цифры.
+        label_keys=frozenset(GA15_KEYS[:2]),
     )
 
 

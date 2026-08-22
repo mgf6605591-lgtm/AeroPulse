@@ -43,6 +43,13 @@ class PivotFormulas:
     column_sums: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
     row_sums: Mapping[int, tuple[int, ...]] = field(default_factory=dict)
 
+    # Колонки-подписи: правило строки их не касается. Номер строки бланка — часть
+    # её имени, а не величина, и складывать номера незачем; беда в том, что
+    # сложение иногда сходится само собой. В бланке 15-ГА строка 03 подписана
+    # «(стр. 01+стр. 02)», и 1 + 2 дало ровно 3: сверка такую формулу принимала,
+    # и номер строки в выгрузке становился вычисляемым.
+    label_keys: frozenset[str] = frozenset()
+
     def __bool__(self) -> bool:
         return bool(self.column_sums or self.row_sums)
 
@@ -80,7 +87,7 @@ class PivotFormulas:
                 ways.append(tuple(cells))
 
         rows = self.row_sums.get(row)
-        if rows:
+        if rows and key not in self.label_keys:
             ways.append(tuple((operand_row, col) for operand_row in rows))
 
         return tuple(ways)
