@@ -2,8 +2,9 @@
 from typing import Any
 from PyQt6.QtCore import QAbstractTableModel, Qt, QModelIndex
 
+from controllers.reports.formulas import NO_FORMULAS, PivotFormulas
 from forms.models.formatting import format_number_ru
-from forms.models.roles import RAW_VALUE_ROLE
+from forms.models.roles import FORMULA_ROLE, RAW_VALUE_ROLE
 from decimal import Decimal
 
 
@@ -15,18 +16,33 @@ class PivotDictModel(QAbstractTableModel):
         self._data = data or []
         self._headers = headers or []
         self._keys = keys or []
+        self._formulas = NO_FORMULAS
+        self._col_by_key: dict[str, int] = {}
 
-    def set_source_data(self, data: list[dict], headers: list[str], keys: list[str]):
+    def set_source_data(
+        self,
+        data: list[dict],
+        headers: list[str],
+        keys: list[str],
+        formulas: PivotFormulas | None = None,
+    ):
         """Установка данных модели.
 
         Метод назывался `setData` и перекрывал `QAbstractItemModel.setData(index,
         value, role)` — стандартный способ Qt записать значение в ячейку. Общего
         у них было только имя (BUG-12).
+
+        `formulas` — правила построителя о том, какие ячейки сложены из каких.
+        Свод, который ничего не складывает, их не передаёт.
         """
         self.beginResetModel()
         self._data = data
         self._headers = headers
         self._keys = keys
+        self._formulas = formulas or NO_FORMULAS
+        # Правила названы ключами колонок, а спрашивают о ячейке по номеру.
+        # Перевод считается один раз на свод, а не на каждый вопрос о ячейке.
+        self._col_by_key = {key: col for col, key in enumerate(keys)}
         self.endResetModel()
 
     def rowCount(self, parent=QModelIndex()) -> int:
@@ -48,6 +64,11 @@ class PivotDictModel(QAbstractTableModel):
         if role == RAW_VALUE_ROLE:
             # Значение без форматирования — для выгрузки в XLSX (FUNC-2).
             return val
+
+        if role == FORMULA_ROLE:
+            # Из чего ячейка сложена — для формул в выгрузке. Сходится ли сумма,
+            # модель не проверяет: это дело того, кто пишет книгу.
+            return self._formulas.operands(r, c, key, self._col_by_key) or None
 
         if role == Qt.ItemDataRole.DisplayRole:
             if val is None or val == "":

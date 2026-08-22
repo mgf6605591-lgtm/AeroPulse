@@ -8,7 +8,12 @@
 
 Чтение модели и окна сообщений переехали в [forms/table_export.py](forms/table_export.py);
 сюда приходят готовые заголовки и строки значений.
+
+Часть ячеек свода — суммы соседних, и они уходят в книгу формулами: правила
+приносит `formulas` ([controllers/reports/formulas.py](controllers/reports/formulas.py)),
+а сверяются они здесь, где есть сами значения.
 """
+import math
 from decimal import Decimal
 from typing import Any
 
@@ -17,6 +22,7 @@ from openpyxl.styles import Alignment, Font
 from openpyxl.utils import get_column_letter
 
 from controllers.export_header import ExportHeader
+from controllers.reports.formulas import CellRef, FormulaMap
 
 
 class ExportController:
@@ -30,6 +36,21 @@ class ExportController:
 
     # Ведущие символы, с которых Excel начинает разбор ячейки как формулы.
     FORMULA_STARTERS = ("=", "+", "-", "@")
+
+    # Насколько сумма слагаемых может разойтись с самой ячейкой, чтобы формула
+    # считалась сверенной. Допуск покрывает только двоичное сложение, но не
+    # расхождение отчёта: значения хранятся десятичными с той точностью, с какой
+    # пришли (db/models/types.py), и наименьшее осмысленное расхождение — единица
+    # последнего знака, то есть тысячные. Отсюда две границы: у малых величин
+    # шум сложения абсолютный, у больших он растёт вместе с самим числом, а
+    # относительная граница остаётся на порядки ниже тысячных.
+    SUM_MATCH_TOLERANCE = 1e-6
+    SUM_MATCH_RELATIVE = 1e-13
+
+    # Со скольких слагаемых запись диапазоном становится понятнее перечисления.
+    # «=D7+E7» читается как подпись графы бланка «(гр.4+гр.5)», «=SUM(D7:E7)» —
+    # уже нет; а вот сумма двадцати авиакомпаний перечислением нечитаема.
+    SUM_RANGE_FROM = 4
 
     @staticmethod
     def _write_cell(ws, row: int, column: int, val: Any):
@@ -63,6 +84,107 @@ class ExportController:
         return cell
 
     @staticmethod
+    def _consecutive(numbers: list[int]) -> bool:
+        """Идут ли номера подряд и по возрастанию — тогда это диапазон."""
+        return all(b - a == 1 for a, b in zip(numbers, numbers[1:], strict=False))
+
+    @staticmethod
+    def _formula_text(operands: tuple[CellRef, ...], data_start_row: int) -> str:
+        """Формула суммы по координатам слагаемых: «=D7+E7» или «=SUM(D7:M7)»."""
+        refs = [
+            f"{get_column_letter(col + 1)}{data_start_row + row}"
+            for row, col in operands
+        ]
+
+        if len(operands) >= ExportController.SUM_RANGE_FROM:
+            rows = [row for row, _ in operands]
+            cols = [col for _, col in operands]
+            one_line = (
+                len(set(rows)) == 1 and ExportController._consecutive(cols)
+                or len(set(cols)) == 1 and ExportController._consecutive(rows)
+            )
+            if one_line:
+                return f"=SUM({refs[0]}:{refs[-1]})"
+
+        return "=" + "+".join(refs)
+
+    @staticmethod
+    def _as_number(val: Any) -> float | None:
+        """Значение ячейки числом; `None` — если складывать его нельзя."""
+        if isinstance(val, Decimal):
+            val = float(val)
+        if isinstance(val, bool) or not isinstance(val, (int, float)):
+            # bool в отчётности нет, а «Х» и «—» — это пометки бланка и отбора.
+            return None
+        return float(val)
+
+    @staticmethod
+    def _sum_checks_out(
+        value: float, operands: tuple[CellRef, ...], rows: list[list[Any]]
+    ) -> bool:
+        """Складываются ли слагаемые ровно в это число.
+
+        Сверка — не перестраховка от своих же ошибок. Итоги, которые свод считает
+        сам, сходятся всегда; а строки 03, 07, 08 бланка 15-ГА, его графы «Всего»
+        и тоннокилометраж 12-ГА приложение не считает, а хранит присланными.
+        Формула там не показывает, откуда взялось число, а пересчитывает его
+        заново — и если отчёт не сходится, в книге оказалась бы третья цифра,
+        не совпадающая ни с экраном, ни с базой.
+
+        Слагаемое, которого нет на листе или которое не число (пустая ячейка,
+        «Х» неприменимой графы, «—» невыбранной), отменяет способ по той же
+        причине: Excel считал бы такую ячейку нулём.
+        """
+        parts = []
+        for operand_row, operand_col in operands:
+            if not 0 <= operand_row < len(rows):
+                return False
+            operand_values = rows[operand_row]
+            if not 0 <= operand_col < len(operand_values):
+                return False
+            part = ExportController._as_number(operand_values[operand_col])
+            if part is None:
+                return False
+            parts.append(part)
+
+        if not parts:
+            return False
+
+        # fsum, а не sum: слагаемых бывает две дюжины, и накопленная ошибка
+        # обычного сложения сама по себе выглядела бы расхождением отчёта.
+        return math.isclose(
+            value,
+            math.fsum(parts),
+            rel_tol=ExportController.SUM_MATCH_RELATIVE,
+            abs_tol=ExportController.SUM_MATCH_TOLERANCE,
+        )
+
+    @staticmethod
+    def _apply_formula(
+        cell,
+        ways: tuple[tuple[CellRef, ...], ...],
+        rows: list[list[Any]],
+        row: int,
+        col: int,
+        data_start_row: int,
+    ) -> bool:
+        """Заменяет число формулой — первым способом, который даёт это же число.
+
+        Способов у ячейки бывает два: сложить по строке и сложить по колонке.
+        Не сошёлся ни один — остаётся число, как и было.
+        """
+        value = ExportController._as_number(rows[row][col])
+        if value is None:
+            return False
+
+        for operands in ways:
+            if ExportController._sum_checks_out(value, operands, rows):
+                cell.value = ExportController._formula_text(operands, data_start_row)
+                return True
+
+        return False
+
+    @staticmethod
     def _write_header(ws, header: ExportHeader | None) -> int:
         """Пишет шапку отчёта и возвращает номер строки, с которой идёт таблица.
 
@@ -91,16 +213,21 @@ class ExportController:
         rows: list[list[Any]],
         header_groups: list[tuple[int, int, str]] | None = None,
         header: ExportHeader | None = None,
+        formulas: FormulaMap | None = None,
     ) -> None:
         """Пишет книгу. Об ошибке сообщает исключением, а не окном и не `False`.
 
         Прежде метод возвращал `False` и сам показывал `QMessageBox`: вызывающий
         не мог узнать, что именно не получилось, а тест не мог позвать экспорт
         вовсе — модальное окно остановило бы прогон (ARCH-2).
+
+        `formulas` — ячейки, которые свод получил сложением, и способы их
+        сложить. Каждый проходит сверку в `_apply_formula`: не сошлось ни одним —
+        остаётся число, как и было.
         """
         ncols = len(headers)
-        nrows = len(rows)
         groups = header_groups or []
+        cell_formulas = formulas or {}
 
         wb = Workbook()
         ws = wb.active
@@ -164,7 +291,12 @@ class ExportController:
         for r, row_values in enumerate(rows):
             excel_row = data_start_row + r
             for c in range(ncols):
-                ExportController._write_cell(ws, excel_row, c + 1, row_values[c])
+                cell = ExportController._write_cell(ws, excel_row, c + 1, row_values[c])
+                ways = cell_formulas.get((r, c))
+                if ways:
+                    ExportController._apply_formula(
+                        cell, ways, rows, r, c, data_start_row
+                    )
 
         # Ширина колонок — грубая оценка по тексту заголовка и первым строкам
         for c in range(ncols):
@@ -174,8 +306,11 @@ class ExportController:
                 v = ws.cell(row=check_row, column=c + 1).value
                 if v is not None:
                     max_len = max(max_len, min(60, len(str(v))))
-            for rr in range(data_start_row, min(data_start_row + 50, data_start_row + nrows)):
-                v = ws.cell(row=rr, column=c + 1).value
+            # Меряются значения, а не то, что записано в ячейку: в ячейке с
+            # формулой лежит её текст, и «=SUM(D7:AB7)» растянуло бы колонку
+            # тем длиннее, чем больше в сводке предприятий.
+            for row_values in rows[:50]:
+                v = row_values[c] if c < len(row_values) else None
                 if v is not None:
                     max_len = max(max_len, min(60, len(str(v))))
             ws.column_dimensions[letter].width = max_len + 2

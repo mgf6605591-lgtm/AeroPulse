@@ -353,7 +353,9 @@ class DataTableWidget(QWidget):
 
         if self.current_view == VIEW_PIVOT:
             data = self.data_controller.load_pivot_data(mode, filters, entity_id)
-            self.pivot_model.set_source_data(data['rows'], data['headers'], data['keys'])
+            self.pivot_model.set_source_data(
+                data['rows'], data['headers'], data['keys'], data.get('formulas')
+            )
             self.grouped_header.set_groups(data['groups'])
             self.frozen_column.set_groups(data['groups'])
             

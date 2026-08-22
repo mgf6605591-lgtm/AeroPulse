@@ -11,6 +11,7 @@ from typing import Any
 
 from controllers.airline_ind_service import AirlineIndicatorService
 from controllers.report_filters import NO_FILTERS, ReportFilters, with_airline
+from controllers.reports.formulas import PivotFormulas
 from controllers.reports.common import (
     EMPTY_PERIOD,
     aggregate_period,
@@ -28,6 +29,7 @@ from utils.constants import (
     GA12_CODES_BY_SECTION,
     GA12_CODE_ORDER_FLAT,
     GA12_DETAIL_TON_CODES,
+    GA12_DETAIL_TON_PARENT,
     GA12_GRAND_TOTAL_HEADER,
     GA12_SECTION_TITLE,
     GA12_SUBHEADING_VTOM,
@@ -181,6 +183,36 @@ def _fill_airline_columns(row, periods, airlines, by_period) -> None:
         for index, airline in enumerate(airlines):
             row[f"m_{pk}_a_{index}"] = dec_to_float(period_data.get(airline, Decimal("0")))
     row[GA12_GRAND_TOTAL_KEY] = dec_to_float(grand_total)
+
+
+def _ton_row_sums(pivot_rows: list[dict[str, Any]]) -> dict[int, tuple[int, ...]]:
+    """Строка тоннокилометража — сумма своей детализации а), б), в).
+
+    Это правило бланка, а не действие приложения: и строка 450, и три её строки
+    «в том числе» приходят из отчёта каждая сама по себе. Правило лишь говорит,
+    что бланк задумал их суммой; сойдётся ли она в присланных цифрах, проверит
+    выгрузка — не сошлось, останется число.
+
+    Строки ищутся по коду в готовом своде: он один и тот же у всех четырёх
+    построителей, и повторять обход бланка ради номеров строк незачем.
+    """
+    row_by_code = {
+        row["code"]: index
+        for index, row in enumerate(pivot_rows)
+        if row.get("code")
+    }
+
+    details: dict[str, list[int]] = defaultdict(list)
+    for code, parent in GA12_DETAIL_TON_PARENT.items():
+        index = row_by_code.get(code)
+        if index is not None:
+            details[parent].append(index)
+
+    return {
+        row_by_code[parent]: tuple(indexes)
+        for parent, indexes in details.items()
+        if parent in row_by_code
+    }
 
 
 def _emit_form_rows(keys, code_to_indicator, fill_cells, vtom_context=None) -> list[dict[str, Any]]:
@@ -390,11 +422,27 @@ def all_airlines(filters: ReportFilters) -> dict[str, Any]:
 
     n_data_rows = _count_ga12_data_rows(pivot_rows)
 
+    # «Свод» месяца складывает авиакомпании этого месяца, крайний «Итого» —
+    # сами «Своды»: ровно тот обход, которым их посчитал `_fill_airline_columns`.
+    column_sums: dict[str, tuple[str, ...]] = {}
+    if airline_names:
+        for period in periods:
+            pk = period_col_key(period)
+            column_sums[f"m_{pk}_total"] = tuple(
+                f"m_{pk}_a_{index}" for index in range(len(airline_names))
+            )
+    column_sums[GA12_GRAND_TOTAL_KEY] = tuple(
+        f"m_{period_col_key(period)}_total" for period in periods
+    )
+
     return {
         'rows': pivot_rows,
         'headers': headers,
         'keys': keys,
         'groups': groups,
+        'formulas': PivotFormulas(
+            column_sums=column_sums, row_sums=_ton_row_sums(pivot_rows)
+        ),
         'stats': {
             'indicators': n_data_rows,
             'airlines': len(airline_names),
@@ -479,11 +527,24 @@ def _compute_airline_routes_pivot(
 
     n_indicators = _count_ga12_data_rows(pivot_rows)
 
+    # Слагаемые перечисляются в порядке колонок, а не в порядке множества:
+    # формула читается слева направо, как графы бланка.
+    total_columns = tuple(rt for rt in route_types_to_show if rt in total_keys)
+
     return {
         "rows": pivot_rows,
         "headers": headers,
         "keys": keys,
         "groups": groups,
+        "formulas": PivotFormulas(
+            column_sums={
+                f"m_{period_col_key(period)}_total": tuple(
+                    f"m_{period_col_key(period)}_rt_{rt}" for rt in total_columns
+                )
+                for period in periods
+            },
+            row_sums=_ton_row_sums(pivot_rows),
+        ),
         "periods": periods,
         "n_indicators": n_indicators,
         "n_records": n_records,
@@ -594,11 +655,23 @@ def multi_airline_by_routes(filters: ReportFilters) -> dict[str, Any]:
 
     n_indicators = _count_ga12_data_rows(pivot_rows)
 
+    total_columns = tuple(rt for rt in route_types_to_show if rt in total_keys)
+    column_sums = {
+        f"m_{period_col_key(period)}_aid_{aid}_total": tuple(
+            f"m_{period_col_key(period)}_aid_{aid}_rt_{rt}" for rt in total_columns
+        )
+        for period in periods
+        for aid, _ in airline_rows
+    }
+
     return {
         "rows": pivot_rows,
         "headers": headers,
         "keys": keys,
         "groups": groups,
+        "formulas": PivotFormulas(
+            column_sums=column_sums, row_sums=_ton_row_sums(pivot_rows)
+        ),
         "stats": {
             "indicators": n_indicators,
             "months": period_count(periods),
@@ -625,6 +698,7 @@ def per_airline(filters: ReportFilters, airline_id: int) -> dict[str, Any]:
         "headers": base["headers"],
         "keys": base["keys"],
         "groups": base["groups"],
+        "formulas": base["formulas"],
         "stats": {
             "airline_name": airline_name,
             "indicators": base["n_indicators"],
@@ -716,6 +790,12 @@ def per_airline_summary(filters: ReportFilters, airline_id: int) -> dict[str, An
         "headers": headers,
         "keys": keys,
         "groups": groups,
+        "formulas": PivotFormulas(
+            column_sums={
+                "total": tuple(f"m_{period_col_key(period)}" for period in periods)
+            },
+            row_sums=_ton_row_sums(pivot_rows),
+        ),
         "stats": {
             "airline_name": airline_name,
             "indicators": n_indicators,

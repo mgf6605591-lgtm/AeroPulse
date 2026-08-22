@@ -13,10 +13,15 @@ from controllers.airport_ind_service import AirportIndicatorService
 from controllers.report_filters import NO_FILTERS, ReportFilters
 from controllers.reports import ga15_metrics
 from controllers.reports.common import aggregate_period, aggregate_total, dec_to_float
+from controllers.reports.formulas import NO_FORMULAS, PivotFormulas
 from db.database import get_session
 from db.models.entities import Airport
 from utils.constants import MONTHS_LIST
-from utils.ga15_airport_layout import GA15_FILTERED_OUT, GA15_METRIC_TAGS
+from utils.ga15_airport_layout import (
+    GA15_FILTERED_OUT,
+    GA15_METRIC_SUMS,
+    GA15_METRIC_TAGS,
+)
 from utils.ga15_summary_layout import (
     GA15_SUMMARY_CHILD_INDENT,
     GA15_SUMMARY_ENTITY_KEY,
@@ -127,7 +132,11 @@ def _rows(
             top.append((airport_id, name))
 
     pivot_rows: list[dict[str, Any]] = []
+    # Номера строк, которые войдут в «Итого». Складываются только предприятия —
+    # те же, что и в самой строке итога, — а разбивка под ними в него уже вошла.
+    total_operands: list[int] = []
     for airport_id, name in top:
+        total_operands.append(len(pivot_rows))
         pivot_rows.append(
             _summary_row(name, [airport_id], blocks, data, selected)
         )
@@ -142,6 +151,7 @@ def _rows(
                 )
             )
 
+    row_sums = {len(pivot_rows): tuple(total_operands)} if total_operands else {}
     pivot_rows.append(
         _summary_row(
             GA15_SUMMARY_TOTAL_TITLE,
@@ -152,7 +162,34 @@ def _rows(
         )
     )
     enterprises = [airport_id for airport_id, _ in top if children.get(airport_id)]
-    return pivot_rows, len(shown), enterprises
+    return pivot_rows, len(shown), enterprises, row_sums
+
+
+def _column_sums(blocks: Sequence[Ga15PeriodBlock]) -> dict[str, tuple[str, ...]]:
+    """Правила колонок сводки: чем каждая графа сложена.
+
+    Колонка квартала и нарастающего итога — сумма своих месяцев, и это то самое
+    сложение, которое сводка уже сделала в `_summary_row`. Месяцы для неё всегда
+    на листе: без них она бы и не появилась.
+
+    У самих месяцев складываются графы «всего» — из отправленных и принятых, как
+    подписано в бланке. Эту сумму приложение не считает, а получает из отчёта,
+    поэтому сверять её будет выгрузка. У квартала графу «всего» так не считаем:
+    сумма своих месяцев вернее, чем сумма двух других сумм.
+    """
+    column_sums: dict[str, tuple[str, ...]] = {}
+    for block in blocks:
+        for tag in GA15_METRIC_TAGS:
+            key = f"{block.key}_{tag}"
+            if len(block.months) > 1:
+                column_sums[key] = tuple(
+                    f"m{year}_{month}_{tag}" for year, month in block.months
+                )
+            elif tag in GA15_METRIC_SUMS:
+                column_sums[key] = tuple(
+                    f"{block.key}_{part}" for part in GA15_METRIC_SUMS[tag]
+                )
+    return column_sums
 
 
 def _empty(headers, keys, groups, message: str) -> dict[str, Any]:
@@ -162,6 +199,7 @@ def _empty(headers, keys, groups, message: str) -> dict[str, Any]:
         "headers": headers,
         "keys": keys,
         "groups": groups,
+        "formulas": NO_FORMULAS,
         "stats": {
             "layout_ga15_summary": True,
             "airports": 0,
@@ -232,13 +270,16 @@ def build(filters: ReportFilters) -> dict[str, Any]:
             "В справочнике нет аэропортов. Загрузите отчёт или заведите их в «Справочниках».",
         )
 
-    pivot_rows, n_airports, enterprises = _rows(shown, blocks, data, selected)
+    pivot_rows, n_airports, enterprises, row_sums = _rows(shown, blocks, data, selected)
 
     return {
         "rows": pivot_rows,
         "headers": headers,
         "keys": keys,
         "groups": groups,
+        "formulas": PivotFormulas(
+            column_sums=_column_sums(blocks), row_sums=row_sums
+        ),
         "stats": {
             "layout_ga15_summary": True,
             "airports": n_airports,

@@ -18,7 +18,8 @@ from PyQt6.QtWidgets import QMessageBox, QTableView
 
 from controllers.export_controller import ExportController
 from controllers.export_header import ExportHeader
-from forms.models.roles import RAW_VALUE_ROLE
+from controllers.reports.formulas import FormulaMap
+from forms.models.roles import FORMULA_ROLE, RAW_VALUE_ROLE
 
 log = logging.getLogger(__name__)
 
@@ -37,11 +38,18 @@ def cell_value(model, index) -> Any:
     return value
 
 
-def read_table(table_view: QTableView) -> tuple[list[str], list[list[Any]]]:
-    """Снимает с таблицы заголовки и значения — всё, что нужно книге."""
+def read_table(
+    table_view: QTableView,
+) -> tuple[list[str], list[list[Any]], FormulaMap]:
+    """Снимает с таблицы заголовки, значения и правила сложения — всё для книги.
+
+    Правила спрашиваются у той же модели: она одна знает, какие ячейки свод
+    сложил из соседних. Модель без этой роли (подробная таблица) отвечает
+    `None`, и книга получается такой же, как раньше.
+    """
     model = table_view.model()
     if model is None:
-        return [], []
+        return [], [], {}
 
     ncols = model.columnCount()
     headers = []
@@ -50,11 +58,19 @@ def read_table(table_view: QTableView) -> tuple[list[str], list[list[Any]]]:
                                    Qt.ItemDataRole.DisplayRole)
         headers.append("" if caption is None else str(caption))
 
-    rows = [
-        [cell_value(model, model.index(row, col)) for col in range(ncols)]
-        for row in range(model.rowCount())
-    ]
-    return headers, rows
+    rows: list[list[Any]] = []
+    formulas: FormulaMap = {}
+    for row in range(model.rowCount()):
+        values = []
+        for col in range(ncols):
+            index = model.index(row, col)
+            values.append(cell_value(model, index))
+            ways = model.data(index, FORMULA_ROLE)
+            if ways:
+                formulas[(row, col)] = tuple(tuple(way) for way in ways)
+        rows.append(values)
+
+    return headers, rows, formulas
 
 
 def export_table_to_excel(
@@ -65,13 +81,14 @@ def export_table_to_excel(
     header: ExportHeader | None = None,
 ) -> bool:
     """Выгружает таблицу и сообщает пользователю, чем дело кончилось."""
-    headers, rows = read_table(table_view)
+    headers, rows, formulas = read_table(table_view)
     if not headers:
         return False
 
     try:
         ExportController.write_workbook(
-            file_path, headers, rows, header_groups=header_groups, header=header
+            file_path, headers, rows,
+            header_groups=header_groups, header=header, formulas=formulas,
         )
     except Exception as error:
         log.exception("Выгрузка в XLSX не выполнена: %s", file_path)

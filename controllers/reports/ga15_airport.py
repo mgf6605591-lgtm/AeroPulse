@@ -6,6 +6,7 @@ from controllers.airport_ind_service import AirportIndicatorService
 from controllers.report_filters import ReportFilters, with_airport
 from controllers.reports import ga15_metrics
 from controllers.reports.common import aggregate_total, dec_to_float, period_label_ru
+from controllers.reports.formulas import PivotFormulas
 from db.database import get_session
 from db.models.entities import Airport
 from utils.ga15_airport_layout import (
@@ -13,9 +14,43 @@ from utils.ga15_airport_layout import (
     GA15_FLAT_HEADERS,
     GA15_HEADER_GROUPS,
     GA15_KEYS,
+    GA15_METRIC_SUMS,
     GA15_METRIC_TAGS,
     GA15_NOT_FILLED,
+    GA15_ROW_SUMS,
 )
+
+
+def _metric_key(tag: str) -> str:
+    """Ключ колонки бланка по метке её графы."""
+    return GA15_KEYS[2 + GA15_METRIC_TAGS.index(tag)]
+
+
+def _blank_formulas(row_by_code: dict[str, int]) -> PivotFormulas:
+    """Итоговые графы и строки бланка — как суммы соседних.
+
+    Ни одну из этих сумм приложение не считает: и графы «Всего», и строки 03,
+    07, 08 приходят из отчёта своими показателями. Правило описывает только
+    замысел бланка; совпадёт ли сумма с присланным числом, проверяет выгрузка, и
+    там, где отчёт не сходится, в книге остаётся число.
+
+    Строка, не попавшая в отбор показателей, в свод не выводится вовсе — тогда
+    складывать нечего, и правила для её итога не будет.
+    """
+    row_sums: dict[int, tuple[int, ...]] = {}
+    for code, parts in GA15_ROW_SUMS.items():
+        index = row_by_code.get(code)
+        operands = tuple(row_by_code[part] for part in parts if part in row_by_code)
+        if index is not None and len(operands) == len(parts):
+            row_sums[index] = operands
+
+    return PivotFormulas(
+        column_sums={
+            _metric_key(tag): tuple(_metric_key(part) for part in parts)
+            for tag, parts in GA15_METRIC_SUMS.items()
+        },
+        row_sums=row_sums,
+    )
 
 
 def _sum_metric(agg: dict[str, Decimal], row_code: str, tag: str) -> tuple:
@@ -54,6 +89,7 @@ def build(filters: ReportFilters, airport_id: int) -> dict[str, Any]:
     period_label = period_label_ru(filters)
     pivot_rows: list[dict[str, Any]] = []
     visible = ga15_metrics.specs_in_filter(selected)
+    row_by_code: dict[str, int] = {}
 
     for spec in visible:
         row = {k: None for k in GA15_KEYS}
@@ -73,6 +109,7 @@ def build(filters: ReportFilters, airport_id: int) -> dict[str, Any]:
             row[GA15_KEYS[1]] = line_disp if line_disp is not None else ""
             rc = spec.row_code
             if rc:
+                row_by_code[rc] = len(pivot_rows)
                 for j, tag in enumerate(GA15_METRIC_TAGS):
                     ci = 2 + j
                     # «Х» — свойство графы бланка, а не признак отсутствия
@@ -109,6 +146,7 @@ def build(filters: ReportFilters, airport_id: int) -> dict[str, Any]:
         "headers": GA15_FLAT_HEADERS,
         "keys": GA15_KEYS,
         "groups": GA15_HEADER_GROUPS,
+        "formulas": _blank_formulas(row_by_code),
         "stats": {
             "airport_name": airport_name,
             "layout_ga15": True,
