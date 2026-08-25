@@ -112,4 +112,19 @@ def migrate_legacy_data_dir(source: Path | None = None,
         new.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(old), str(new))
         moved.append(item.as_posix())
+
+    # Опустевшие каталоги убираются следом. Иначе рядом с exe остаётся db/ с
+    # backups/ внутри, и каталог установки перестаёт совпадать с тем, что
+    # положил установщик, — а именно по такому расхождению и замечают, что
+    # программа пишет туда, куда не должна.
+    #
+    # rmdir, а не удаление поддерева: он снимает только то, что действительно
+    # опустело. Если пользователь держал в db/ что-то своё, вызов не пройдёт, и
+    # это правильный исход — чужое здесь трогать не за что.
+    for leftover in (source / "db" / "backups", source / "db"):
+        try:
+            leftover.rmdir()
+        except OSError:
+            pass
+
     return moved
