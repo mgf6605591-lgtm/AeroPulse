@@ -12,8 +12,12 @@
 """
 
 import os
+import sqlite3
+import subprocess
+import sys
 import tempfile
 import unittest
+from contextlib import closing
 from pathlib import Path
 from unittest.mock import patch
 
@@ -207,6 +211,35 @@ class LegacyMoveTest(unittest.TestCase):
         self.move()
 
         self.assertEqual([], self.move())
+
+    def test_a_real_database_survives_with_its_wal_unread(self):
+        """Тот самый случай, ради которого переезд делается целиком.
+
+        Запись оборвана без закрытия базы — так выглядит сбой питания или
+        снятие процесса. Строка осталась в `-wal`, основной файл пуст: перенеси
+        переезд только `database.db`, и пользователь открыл бы пустую базу.
+        """
+        writer = (
+            "import os, sqlite3, sys\n"
+            "conn = sqlite3.connect(sys.argv[1])\n"
+            "conn.execute('PRAGMA journal_mode=WAL')\n"
+            "conn.execute('create table отчёт(значение text)')\n"
+            "conn.execute(\"insert into отчёт values ('5896.29')\")\n"
+            "conn.commit()\n"
+            "os._exit(9)\n"
+        )
+        database = self.source / "db" / "database.db"
+        database.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run([sys.executable, "-c", writer, str(database)], check=False)
+
+        self.assertTrue((self.source / "db" / "database.db-wal").is_file(),
+                        "проверка бессмысленна без незакрытого -wal")
+
+        self.move()
+
+        with closing(sqlite3.connect(self.target / "db" / "database.db")) as conn:
+            self.assertEqual([("5896.29",)],
+                             conn.execute("select значение from отчёт").fetchall())
 
 
 class RelocationFailureTest(unittest.TestCase):
