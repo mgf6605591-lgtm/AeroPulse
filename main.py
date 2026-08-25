@@ -6,12 +6,13 @@ from utils.qt_plugins import ensure_qt_platform_plugins
 
 ensure_qt_platform_plugins()
 
+from PyQt6.QtGui import QIcon
 from PyQt6.QtWidgets import QApplication, QMessageBox
 from db.database import init_db
 from forms.app_controller import AppController
 from forms.widgets.account_dialogs import ensure_initial_admin
 from utils.logging_setup import log_path, setup_logging
-from utils.paths import get_app_dir, migrate_legacy_data_dir
+from utils.paths import get_app_dir, migrate_legacy_data_dir, resource_path
 
 log = logging.getLogger(__name__)
 
@@ -41,6 +42,9 @@ def main():
     # упавшая миграция — оставляла пользователя без единого сообщения: показать
     # его было нечем, а трейсбек уходил в несуществующий stdout (BUG-15).
     app = QApplication(sys.argv)
+    # Иконка задаётся явно, а не берётся из ресурсов exe: при запуске из
+    # исходников ресурсов нет, и окно осталось бы с заглушкой Qt.
+    app.setWindowIcon(QIcon(str(resource_path("assets", "AeroPulse.ico"))))
     # Смена окна входа на главное и обратно проходит через момент, когда открытых
     # окон нет. С поведением по умолчанию приложение в этот момент завершалось бы,
     # и переход держался бы лишь на том, что новое окно успевает появиться.

@@ -1,0 +1,20 @@
+# Инструменты сборки дистрибутива. В requirements.txt им не место: приложение
+# их не импортирует, а на машине пользователя их нет вовсе.
+#
+# Версии закреплены по той же причине, что и рабочие (INFRA-4), и даже строже:
+# именно PyInstaller решает, что окажется внутри exe. Сборка, собранная другой
+# версией, — другой дистрибутив, даже если исходники те же.
+
+# --- то, чем собирается exe ---
+pyinstaller==6.22.2
+pyinstaller-hooks-contrib==2026.7      # правила сборки для сторонних пакетов
+
+# --- подтягивается перечисленным выше ---
+altgraph==0.17.5         # pyinstaller: граф зависимостей модулей
+packaging==26.3          # pyinstaller
+setuptools==84.0.0       # pyinstaller: pkg_resources в хуках
+pefile==2024.8.26        # pyinstaller, только Windows: разбор PE
+pywin32-ctypes==0.2.3    # pyinstaller, только Windows: ресурсы версии и иконки
+
+# Установщик собирает Inno Setup 6.3 или новее — он ставится не через pip
+# (choco install innosetup), см. .github/workflows/installer.yml.

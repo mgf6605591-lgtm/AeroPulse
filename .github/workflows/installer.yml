@@ -1,0 +1,87 @@
+name: Установщик для Windows
+
+# Сборка отделена от прогона тестов: она нужна не на каждую ветку, идёт минуты и
+# требует Windows. Тесты по-прежнему гоняются на всё подряд (tests.yml).
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  installer:
+    runs-on: windows-latest
+    name: Сборка дистрибутива и установщика
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # Собирается заявленным минимумом: внутрь exe уезжает именно этот
+      # интерпретатор, и брать более новый, чем поддерживают исходники, незачем.
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Зависимости
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-build.txt
+
+      - name: Версия
+        id: version
+        run: |
+          $v = python -c "import tomllib, pathlib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_text(encoding='utf-8'))['project']['version'])"
+          "value=$v" >> $env:GITHUB_OUTPUT
+          Write-Host "Версия из pyproject.toml: $v"
+
+      - name: Сборка exe
+        run: pyinstaller aeropulse.spec
+
+      # Три каталога попадают в бандл только через datas, и их отсутствие exe не
+      # ломает — оно всплывает у пользователя: без migrations не поднимается
+      # схема, без forms/UIs не открывается окно входа, без assets окно остаётся
+      # с заглушкой Qt. Проверяется здесь, а не там.
+      - name: Проверка состава бандла
+        run: |
+          $required = @(
+            "dist\AeroPulse\AeroPulse.exe",
+            "dist\AeroPulse\_internal\migrations\env.py",
+            "dist\AeroPulse\_internal\forms\UIs\auth.ui",
+            "dist\AeroPulse\_internal\assets\AeroPulse.ico"
+          )
+          foreach ($path in $required) {
+            if (-not (Test-Path $path)) { throw "В сборке нет $path" }
+          }
+          $exe = Get-Item "dist\AeroPulse\AeroPulse.exe"
+          $version = $exe.VersionInfo.FileVersion
+          Write-Host "Версия в свойствах exe: $version"
+          if ($version -ne "${{ steps.version.outputs.value }}") {
+            throw "Версия в exe разошлась с pyproject.toml"
+          }
+
+      - name: Inno Setup
+        run: choco install innosetup -y --no-progress
+
+      - name: Сборка установщика
+        run: iscc installer\AeroPulse.iss
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AeroPulse-Setup-${{ steps.version.outputs.value }}
+          path: dist/AeroPulse-Setup-*.exe
+          if-no-files-found: error
+
+      # Тег вида v1.2.3 выкладывает готовый установщик в релиз: иначе его пришлось
+      # бы доставать из артефактов сборки, а они живут ограниченное время.
+      - name: Релиз
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$env:GITHUB_REF_NAME" (Get-Item dist\AeroPulse-Setup-*.exe) `
+            --title "AeroPulse $env:GITHUB_REF_NAME" `
+            --notes "Установщик для Windows. Ставится без прав администратора, в профиль пользователя."
