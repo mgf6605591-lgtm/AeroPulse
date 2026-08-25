@@ -6,6 +6,7 @@
 Windows), поэтому проверяется то, из чего он собирается.
 """
 
+import ast
 import re
 import struct
 import tempfile
@@ -24,6 +25,20 @@ BUILD_REQUIREMENTS = PROJECT_ROOT / "requirements-build.txt"
 def project_version() -> str:
     data = tomllib.loads((PROJECT_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
     return data["project"]["version"]
+
+
+# Каталоги, которых нет в графе импортов сборки: тесты внутрь не уезжают,
+# остальное — не исходники.
+NOT_ANALYSED = {".git", ".github", ".venv", "build", "dist", "tests"}
+
+
+def analysed_sources() -> list[Path]:
+    """Файлы, по которым PyInstaller строит граф импортов, начиная с main.py."""
+    sources = list(PROJECT_ROOT.glob("*.py"))
+    for entry in sorted(PROJECT_ROOT.iterdir()):
+        if entry.is_dir() and entry.name not in NOT_ANALYSED:
+            sources.extend(entry.rglob("*.py"))
+    return sources
 
 
 class _SpecStub:
@@ -260,6 +275,59 @@ class BuildWorkflowTest(unittest.TestCase):
         for package in packages:
             self.assertRegex(package, r"^[A-Za-z0-9][A-Za-z0-9._-]*==[A-Za-z0-9.+!-]+$")
         self.assertIn("requirements-build.txt", self.text)
+
+
+
+class BundledDataImportsTest(unittest.TestCase):
+    """Импорты файлов, которые уезжают внутрь данными, а не импортом.
+
+    migrations/ попадает в бандл через datas: PyInstaller копирует эти файлы как
+    есть, в содержимое не заглядывая. Исполняет их потом Alembic — сам, через
+    load_python_file. Значит, всё, что они импортируют, обязано оказаться внутри
+    по другой причине: либо это импортирует разбираемый код приложения, либо оно
+    названо в hiddenimports. Так не оказалось `logging.config`, и собранное
+    падало на первой же миграции — то есть уже у пользователя.
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        cls.namespace, _ = run_spec()
+
+    @staticmethod
+    def imports(paths) -> set[str]:
+        """Модули, названные в import-строках перечисленных файлов."""
+        found: set[str] = set()
+        for path in paths:
+            tree = ast.parse(path.read_text(encoding="utf-8"), str(path))
+            for node in ast.walk(tree):
+                if isinstance(node, ast.Import):
+                    found.update(alias.name for alias in node.names)
+                # Относительный импорт разрешается внутри своего же пакета,
+                # который уезжает целиком, — отдельного упоминания он не требует.
+                elif isinstance(node, ast.ImportFrom) and not node.level and node.module:
+                    found.add(node.module)
+        return found
+
+    def test_nothing_they_import_is_left_out_of_the_bundle(self):
+        roots = [(PROJECT_ROOT / source).resolve()
+                 for source, _ in self.namespace["datas"]]
+        shipped = [path for root in roots if root.is_dir()
+                   for path in sorted(root.rglob("*.py"))]
+        self.assertTrue(shipped, "среди datas не осталось .py — тест потерял предмет")
+
+        analysed = self.imports(
+            path for path in analysed_sources()
+            if not any(path.is_relative_to(root) for root in roots)
+        )
+        hidden = set(self.namespace["hiddenimports"])
+
+        for module in sorted(self.imports(shipped)):
+            with self.subTest(module=module):
+                self.assertTrue(
+                    module in hidden or module in analysed,
+                    f"{module} внутрь не попадёт: разбираемый код его не "
+                    "импортирует, и в hiddenimports его нет",
+                )
 
 
 if __name__ == "__main__":
