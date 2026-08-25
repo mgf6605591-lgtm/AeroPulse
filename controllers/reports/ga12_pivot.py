@@ -31,6 +31,7 @@ from utils.constants import (
     GA12_DETAIL_TON_CODES,
     GA12_DETAIL_TON_PARENT,
     GA12_GRAND_TOTAL_HEADER,
+    GA12_PERIOD_TOTAL_GROUP,
     GA12_SECTION_TITLE,
     GA12_SUBHEADING_VTOM,
     GA12_TON_PARENT_CODES,
@@ -45,6 +46,15 @@ from utils.ga12_layout import ga12_total_route_types
 # Ключ крайней правой колонки общего свода. Под группу месяца он не подходит:
 # у тех ключи начинаются с `m_<период>_`.
 GA12_GRAND_TOTAL_KEY = "grand_total"
+
+
+def ga12_airline_total_key(index: int) -> str:
+    """Ключ колонки итога одной а/к за весь показанный период.
+
+    Начинается не с `m_`: колонка относится ко всем месяцам сразу, и попадать в
+    обходы, которые ищут колонки месяца по этому префиксу, ей незачем.
+    """
+    return f"total_a_{index}"
 
 
 def _route_type_keys_for_total_sum(selected_route_type_names: list[str]) -> set[str]:
@@ -164,24 +174,30 @@ def _emit_vtom_before_row(
 
 
 def _fill_airline_columns(row, periods, airlines, by_period) -> None:
-    """Колонки свода по всем АК: «Свод» за период, предприятия и общий «Итого».
+    """Колонки свода по всем АК: «Свод» за период, предприятия, итог каждой а/к
+    за весь период и общий «Итого».
 
-    «Свод» — итог месяца по выбранным авиакомпаниям, `grand_total` — тот же итог
-    за все показанные месяцы разом. Складываются они из одних и тех же значений,
-    поэтому и считаются в одном обходе: иначе крайняя правая колонка могла бы
-    разойтись с суммой колонок «Свод» у себя же в строке.
+    «Свод» — итог месяца по выбранным авиакомпаниям, `total_a_<i>` — итог одной
+    а/к за все показанные месяцы, `grand_total` — тот же итог по всем а/к разом.
+    Складываются они из одних и тех же значений, поэтому и считаются в одном
+    обходе: иначе итоговые колонки могли бы разойтись с колонками месяцев у себя
+    же в строке.
     """
     grand_total = Decimal("0")
+    airline_totals = [Decimal("0")] * len(airlines)
     for period in periods:
         period_data = by_period.get(period, {})
         pk = period_col_key(period)
         total = Decimal("0")
-        for airline in airlines:
-            total += period_data.get(airline, Decimal("0"))
+        for index, airline in enumerate(airlines):
+            value = period_data.get(airline, Decimal("0"))
+            total += value
+            airline_totals[index] += value
+            row[f"m_{pk}_a_{index}"] = dec_to_float(value)
         grand_total += total
         row[f"m_{pk}_total"] = dec_to_float(total)
-        for index, airline in enumerate(airlines):
-            row[f"m_{pk}_a_{index}"] = dec_to_float(period_data.get(airline, Decimal("0")))
+    for index, value in enumerate(airline_totals):
+        row[ga12_airline_total_key(index)] = dec_to_float(value)
     row[GA12_GRAND_TOTAL_KEY] = dec_to_float(grand_total)
 
 
@@ -369,6 +385,17 @@ def all_airlines(filters: ReportFilters) -> dict[str, Any]:
         last = col - 1
         groups.append((first, last, period_label(period)))
 
+    # Итоги за весь показанный период — своей группой перед общим итогом.
+    # Колонка «Свод» отвечает только за свой месяц, и год по одному предприятию
+    # приходилось складывать глазами по месяцам.
+    if airline_names:
+        first = col
+        for index, airline in enumerate(airline_names):
+            headers.append(airline)
+            keys.append(ga12_airline_total_key(index))
+            col += 1
+        groups.append((first, col - 1, GA12_PERIOD_TOTAL_GROUP))
+
     # Общий итог — крайняя правая колонка и вне групп месяцев: он относится ко
     # всей строке сразу, а не к одному из периодов. Заголовок без группы над ним
     # рисуется на всю высоту шапки (см. forms/widgets/multilevel_header.py).
@@ -422,14 +449,19 @@ def all_airlines(filters: ReportFilters) -> dict[str, Any]:
 
     n_data_rows = _count_ga12_data_rows(pivot_rows)
 
-    # «Свод» месяца складывает авиакомпании этого месяца, крайний «Итого» —
-    # сами «Своды»: ровно тот обход, которым их посчитал `_fill_airline_columns`.
+    # «Свод» месяца складывает авиакомпании этого месяца, итог а/к — её же
+    # колонки по месяцам, крайний «Итого» — сами «Своды»: ровно те обходы,
+    # которыми их посчитал `_fill_airline_columns`.
     column_sums: dict[str, tuple[str, ...]] = {}
     if airline_names:
         for period in periods:
             pk = period_col_key(period)
             column_sums[f"m_{pk}_total"] = tuple(
                 f"m_{pk}_a_{index}" for index in range(len(airline_names))
+            )
+        for index in range(len(airline_names)):
+            column_sums[ga12_airline_total_key(index)] = tuple(
+                f"m_{period_col_key(period)}_a_{index}" for period in periods
             )
     column_sums[GA12_GRAND_TOTAL_KEY] = tuple(
         f"m_{period_col_key(period)}_total" for period in periods

@@ -20,6 +20,18 @@ from controllers.reports.common import (
     sorted_periods,
 )
 from tests.support import FakeRecord, PivotCase
+from utils.constants import GA12_PERIOD_TOTAL_GROUP
+
+
+def month_group_labels(result) -> list[str]:
+    """Подписи групп месяцев — без группы итогов за весь период.
+
+    Та стоит справа от месяцев и к их порядку отношения не имеет.
+    """
+    return [
+        label for _first, _last, label in result["groups"]
+        if label != GA12_PERIOD_TOTAL_GROUP
+    ]
 
 
 class PeriodHelpersTest(unittest.TestCase):
@@ -74,8 +86,7 @@ class TwoYearPivotTest(PivotCase):
 
     def test_labels_name_the_year(self):
         result = self.build_all_airlines(self.records)
-        labels = [group[2] for group in result["groups"]]
-        self.assertEqual(labels, ["Январь 2024", "Январь 2025"])
+        self.assertEqual(month_group_labels(result), ["Январь 2024", "Январь 2025"])
 
     def test_two_periods_are_counted(self):
         result = self.build_all_airlines(self.records)
@@ -88,7 +99,7 @@ class PeriodOrderTest(PivotCase):
             FakeRecord("965", "Самолето-километры", "January", 2025, 1),
             FakeRecord("965", "Самолето-километры", "December", 2024, 2),
         ]
-        labels = [group[2] for group in self.build_all_airlines(records)["groups"]]
+        labels = month_group_labels(self.build_all_airlines(records))
         self.assertEqual(labels, ["Декабрь 2024", "Январь 2025"])
 
 
