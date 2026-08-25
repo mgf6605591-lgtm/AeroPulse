@@ -29,7 +29,14 @@ class PluginSearchTest(unittest.TestCase):
             self.assertNotIn("QT_PLUGIN_PATH", qt_plugins.os.environ)
 
     def test_search_still_runs_on_windows(self):
+        """Под Windows поиск обязан продолжиться, а не отсечься на платформе."""
+        # PyQt6 прячется из sys.modules намеренно. На самой Windows каталог
+        # плагинов находится по QLibraryInfo с первой попытки, функция выходит
+        # раньше site-packages, и проверять по нему нечего: тест зелен только
+        # там, где qwindows.dll нет вовсе. Проверяется, что ветка открыта, а не
+        # то, каким из способов поиск закончился.
         with patch.object(qt_plugins.sys, "platform", "win32"), \
+             patch.dict(qt_plugins.sys.modules, {"PyQt6": None, "PyQt6.QtCore": None}), \
              patch.object(qt_plugins.site, "getsitepackages", return_value=[]) as get_sitepackages, \
              patch.object(qt_plugins.site, "getusersitepackages", return_value=""):
             qt_plugins.ensure_qt_platform_plugins()
