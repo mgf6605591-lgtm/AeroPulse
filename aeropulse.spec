@@ -88,6 +88,11 @@ datas = [
 hiddenimports = [
     "alembic.runtime.migration",
     "sqlalchemy.dialects.sqlite",
+    # migrations/env.py уезжает в бандл данными, и его первую строку —
+    # `from logging.config import fileConfig` — анализ импортов не разбирает:
+    # файл исполняет сам Alembic, через load_python_file. Собранное без этого
+    # запускается и падает на первой же миграции, то есть уже у пользователя.
+    "logging.config",
 ]
 
 a = Analysis(
