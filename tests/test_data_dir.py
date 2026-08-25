@@ -170,6 +170,33 @@ class LegacyMoveTest(unittest.TestCase):
         self.assertEqual([], left)
         self.assertEqual([], list(self.source.glob("aeropulse.log*")))
 
+    def test_emptied_directories_go_away(self):
+        """Пустой db/ рядом с exe — это след, по которому судят о программе.
+
+        Каталог установки после переезда обязан совпадать с тем, что положил
+        установщик: расхождение читается как «программа пишет в свой каталог»,
+        и разбираться, что там всего лишь пустая папка, никто не станет.
+        """
+        self.make_legacy()
+
+        self.move()
+
+        self.assertFalse((self.source / "db" / "backups").exists())
+        self.assertFalse((self.source / "db").exists())
+
+    def test_someone_elses_file_keeps_its_directory(self):
+        """Каталог с чужим содержимым не трогается — вместе с содержимым."""
+        self.make_legacy()
+        stranger = self.source / "db" / "заметка.txt"
+        stranger.write_text("не наше", encoding="utf-8")
+
+        self.move()
+
+        self.assertTrue((self.source / "db").is_dir())
+        self.assertEqual("не наше", stranger.read_text(encoding="utf-8"))
+        # Копии всё равно уехали, и их опустевший каталог убран.
+        self.assertFalse((self.source / "db" / "backups").exists())
+
     def test_it_says_what_it_moved(self):
         self.make_legacy(backups=1, logs=("aeropulse.log",))
 
