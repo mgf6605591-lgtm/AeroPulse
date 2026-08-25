@@ -29,6 +29,20 @@ from utils.paths import (
     migrate_legacy_data_dir,
 )
 
+try:
+    from PyQt6.QtWidgets import QApplication
+    HAS_QT = True
+except ImportError:  # PyQt6 отсутствует — проверки Qt пропускаются
+    HAS_QT = False
+
+_app = None
+
+
+def setUpModule():
+    global _app
+    if HAS_QT:
+        _app = QApplication.instance() or QApplication([])
+
 
 class DevelopmentDataDirTest(unittest.TestCase):
     """В разработке ничего не переезжает: каталог данных — корень проекта."""
@@ -296,6 +310,48 @@ class RelocationFailureTest(unittest.TestCase):
 
         # Дошло до базы — значит, переезд запуску не помешал.
         self.assertIn("дальше не идём", message_box.critical.call_args.args[2])
+
+
+
+@unittest.skipUnless(HAS_QT, "PyQt6 не установлен")
+class FileDialogStartsOutsideTheProgramTest(unittest.TestCase):
+    """С чего начинают файловые диалоги.
+
+    Каталог программы — рабочая директория процесса, и диалог без явно
+    указанного места открывается именно там. Пользователю показывают потроха
+    дистрибутива и предлагают в них ориентироваться, а сохранённое туда уносит
+    первым же обновлением. Проверяется не буквальный путь — он зависит от
+    машины, — а то, что предложенное место лежит вне каталога программы.
+    """
+
+    def opened_at(self, calls) -> Path:
+        """Каталог, с которого диалог начинает; из вызова Qt его и достаём."""
+        self.assertTrue(calls, "диалог не был вызван")
+        arguments, _ = calls[0]
+        start = arguments[2]
+        self.assertTrue(start, "диалогу не задано место — он откроется в каталоге программы")
+        return Path(start)
+
+    def test_import_does_not_open_inside_the_program(self):
+        from forms.mainWin import MainWindow
+
+        window = MainWindow.__new__(MainWindow)
+        calls = []
+        with patch("forms.mainWin.QFileDialog.getOpenFileNames",
+                   side_effect=lambda *a, **kw: calls.append((a, kw)) or ([], "")):
+            window.import_file()
+
+        start = self.opened_at(calls)
+        self.assertFalse(start.is_relative_to(get_app_dir()), start)
+
+    def test_export_does_not_offer_to_save_inside_the_program(self):
+        from forms.mainWin import _default_export_path
+
+        suggested = Path(_default_export_path())
+        self.assertEqual(".xlsx", suggested.suffix)
+        # Одно имя без каталога — это и есть «сохранить в рабочую директорию».
+        self.assertNotEqual(suggested.name, str(suggested))
+        self.assertFalse(suggested.parent.is_relative_to(get_app_dir()), suggested)
 
 
 if __name__ == "__main__":
