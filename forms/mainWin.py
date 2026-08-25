@@ -37,17 +37,27 @@ from utils.constants import MONTHS_RU, MODE_AIRLINE, MODE_AIRPORT
 log = logging.getLogger(__name__)
 
 
+def _documents_dir() -> str:
+    """«Документы» — то место, где пользователь держит отчётность.
+
+    Рабочая директория у программы — её собственный каталог установки. Диалог,
+    открытый там, показывает пользователю потроха дистрибутива и предлагает
+    искать свои файлы среди чужих; выгрузку, положенную туда же, унесло бы
+    первым обновлением. Пустая строка — «место не определилось»: диалог тогда
+    открывается там же, где открылся бы и без указания каталога.
+    """
+    return QStandardPaths.writableLocation(
+        QStandardPaths.StandardLocation.DocumentsLocation
+    )
+
+
 def _default_export_path() -> str:
     """Куда диалог сохранения предлагает положить выгрузку.
 
-    Имя без каталога открывало бы диалог в рабочей директории, а она у программы
-    — её собственный каталог установки: выгрузки складывались бы внутрь
-    программы и пропадали при её удалении. «Документы» — то место, где
-    пользователь их потом и будет искать.
+    Имя без каталога открывало бы диалог в рабочей директории — со всеми
+    последствиями, описанными выше.
     """
-    documents = QStandardPaths.writableLocation(
-        QStandardPaths.StandardLocation.DocumentsLocation
-    )
+    documents = _documents_dir()
     return str(Path(documents) / "export.xlsx") if documents else "export.xlsx"
 
 
@@ -188,7 +198,7 @@ class MainWindow(QMainWindow):
     def import_file(self):
         """Импорт одного или нескольких файлов; месяц/год — с листа «Титул» (D13) в каждом файле."""
         paths, _ = QFileDialog.getOpenFileNames(
-            self, "Выберите файлы для импорта", "",
+            self, "Выберите файлы для импорта", _documents_dir(),
             "Excel и XML (*.xlsx *.xls *.xml);;Excel (*.xlsx *.xls);;XML (*.xml);;Все файлы (*)"
         )
         if not paths:
