@@ -12,7 +12,7 @@ from utils.qt_plugins import ensure_qt_platform_plugins
 ensure_qt_platform_plugins()
 
 import logging
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import QStandardPaths, pyqtSignal
 from PyQt6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QTabWidget,
     QPushButton, QFileDialog, QMessageBox
@@ -35,6 +35,20 @@ from forms.table_export import export_table_to_excel
 from utils.constants import MONTHS_RU, MODE_AIRLINE, MODE_AIRPORT
 
 log = logging.getLogger(__name__)
+
+
+def _default_export_path() -> str:
+    """Куда диалог сохранения предлагает положить выгрузку.
+
+    Имя без каталога открывало бы диалог в рабочей директории, а она у программы
+    — её собственный каталог установки: выгрузки складывались бы внутрь
+    программы и пропадали при её удалении. «Документы» — то место, где
+    пользователь их потом и будет искать.
+    """
+    documents = QStandardPaths.writableLocation(
+        QStandardPaths.StandardLocation.DocumentsLocation
+    )
+    return str(Path(documents) / "export.xlsx") if documents else "export.xlsx"
 
 
 class MainWindow(QMainWindow):
@@ -298,7 +312,7 @@ class MainWindow(QMainWindow):
     def export_to_xlsx(self):
         """Экспорт текущей вкладки в Excel"""
         file_path, _ = QFileDialog.getSaveFileName(
-            self, "Сохранить как", "export.xlsx",
+            self, "Сохранить как", _default_export_path(),
             "Excel файлы (*.xlsx)"
         )
         if not file_path:

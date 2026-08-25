@@ -5,19 +5,19 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import NullPool
 from contextlib import contextmanager
 
-from utils.paths import get_app_dir, is_frozen
+from utils.paths import get_data_dir
 
 
 def _resolve_db_path() -> Path:
-    if is_frozen():
-        db_path = get_app_dir() / "db" / "database.db"
-    else:
-        db_path = Path(__file__).resolve().parent / "database.db"
+    db_path = get_data_dir() / "db" / "database.db"
     db_path.parent.mkdir(parents=True, exist_ok=True)
     return db_path
 
 
-# Абсолютный путь к БД: в exe — рядом с main.exe, в разработке — db/database.db.
+# Абсолютный путь к БД: в установленной программе — в каталоге данных
+# пользователя, в разработке — db/database.db в корне проекта. Рядом с exe база
+# больше не лежит: тот каталог принадлежит установщику, и обновление его
+# перезаписывает.
 _db_path = _resolve_db_path()
 DB_URL = f"sqlite:///{_db_path.as_posix()}"
 

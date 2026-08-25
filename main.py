@@ -11,7 +11,7 @@ from db.database import init_db
 from forms.app_controller import AppController
 from forms.widgets.account_dialogs import ensure_initial_admin
 from utils.logging_setup import log_path, setup_logging
-from utils.paths import get_app_dir
+from utils.paths import get_app_dir, migrate_legacy_data_dir
 
 log = logging.getLogger(__name__)
 
@@ -23,8 +23,18 @@ def main():
     except OSError:
         pass
 
+    # Данные переезжают из каталога программы прежде, чем журнал и база откроют
+    # там свои файлы: перенос застал бы их занятыми, а на Windows занятый файл
+    # не переименовать.
+    moved, move_error = _relocate_user_data()
+
     written_to = setup_logging()
     log.info("Запуск приложения; журнал: %s", written_to or "только вывод")
+    if moved:
+        log.info("Данные перенесены в каталог пользователя: %s", ", ".join(moved))
+    if move_error is not None:
+        log.error("Не удалось перенести данные в каталог пользователя",
+                  exc_info=move_error)
 
     # QApplication создаётся до обращения к базе. Прежде init_db() шёл первым, и
     # любая его неудача — повреждённая база, нет прав на запись рядом с exe,
@@ -36,6 +46,19 @@ def main():
     # и переход держался бы лишь на том, что новое окно успевает появиться.
     # Закрывается программа теперь там, где это решено явно — в AppController.
     app.setQuitOnLastWindowClosed(False)
+
+    # Запуск с неперенесённой базой опаснее, чем отказ запускаться: программа
+    # завела бы в новом каталоге пустую базу, и для пользователя это выглядит
+    # как потеря всей отчётности, хотя прежняя лежит на месте.
+    if move_error is not None:
+        _show_startup_failure(
+            "Не удалось перенести данные в каталог пользователя.\n"
+            "Программа не запущена, чтобы не начать работу с пустой базой, "
+            "пока прежняя лежит рядом с программой.",
+            move_error,
+            written_to,
+        )
+        sys.exit(1)
 
     try:
         init_db()
@@ -62,6 +85,19 @@ def main():
         _show_startup_failure("Не удалось открыть окно входа.", error, written_to)
         sys.exit(1)
     sys.exit(app.exec())
+
+
+def _relocate_user_data() -> tuple[list[str], Exception | None]:
+    """Переносит данные из каталога программы. Ошибку возвращает, а не поднимает.
+
+    Показать её здесь нечем: `QApplication` ещё не создан, а журнал ещё не
+    настроен — он и сам живёт в том каталоге, который этот перенос заканчивает.
+    Поэтому решение о том, что делать с неудачей, принимается выше.
+    """
+    try:
+        return migrate_legacy_data_dir(), None
+    except OSError as error:
+        return [], error
 
 
 def _show_startup_failure(what: str, error: Exception, written_to) -> None:
