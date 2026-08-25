@@ -100,6 +100,15 @@ class Ga12FormulaRulesTest(PivotCase):
             result["formulas"].column_sums["grand_total"],
         )
 
+    def test_airline_period_total_sums_its_own_months(self):
+        """Итог предприятия за период складывает его же колонки, а не «Своды»."""
+        result = self.build_all_airlines(self.records())
+
+        self.assertEqual(
+            ("m_2025_January_a_0", "m_2025_February_a_0"),
+            result["formulas"].column_sums["total_a_0"],
+        )
+
     def test_collapsed_summary_sums_the_periods(self):
         result = self.build_per_airline_summary(self.records())
 

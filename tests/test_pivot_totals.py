@@ -15,9 +15,13 @@
 
 import unittest
 
-from controllers.reports.ga12_pivot import _route_type_keys_for_total_sum
+from controllers.reports.ga12_pivot import (
+    _route_type_keys_for_total_sum,
+    ga12_airline_total_key,
+)
 from controllers.report_filters import ReportFilters
 from tests.support import FakeRecord, PivotCase
+from utils.constants import GA12_PERIOD_TOTAL_GROUP
 
 # Строка 1 бланка: международные (гр. 4 и 5), внутренние всего (гр. 6),
 # из них местные (гр. 7). Графа 9 бланка — ИТОГО гр.4+гр.5+гр.6.
@@ -247,6 +251,103 @@ class GrandTotalColumnTest(PivotCase):
         ):
             with self.subTest(build=build.__name__):
                 self.assertNotIn("grand_total", build(self.records)["keys"])
+
+
+class AirlinePeriodTotalColumnsTest(PivotCase):
+    """Группа «За весь период» перед общим итогом: по колонке на авиакомпанию.
+
+    «Свод» отвечает за свой месяц, крайний «Итого» — за всех сразу, а год по
+    одному предприятию до сих пор приходилось складывать глазами по месяцам.
+    """
+
+    def two_months_two_airlines(self):
+        return (
+            blank_row_records(month="January")
+            + blank_row_records(month="February")
+            + blank_row_records(month="January", airline=("Вторая АК", 2))
+            + blank_row_records(month="February", airline=("Вторая АК", 2))
+        )
+
+    def test_columns_stand_between_the_months_and_the_grand_total(self):
+        result = self.build_all_airlines(self.two_months_two_airlines())
+
+        self.assertEqual(
+            ["total_a_0", "total_a_1", "grand_total"], result["keys"][-3:]
+        )
+
+    def test_columns_are_headed_by_the_airline_names(self):
+        """Название предприятия — как и в группе месяца; группа говорит, за что итог."""
+        result = self.build_all_airlines(self.two_months_two_airlines())
+
+        self.assertEqual(["Вторая АК", "Тестовая АК"], result["headers"][-3:-1])
+
+    def test_the_group_names_the_whole_period(self):
+        result = self.build_all_airlines(self.two_months_two_airlines())
+
+        first, last, label = result["groups"][-1]
+        self.assertEqual(GA12_PERIOD_TOTAL_GROUP, label)
+        self.assertEqual(len(result["headers"]) - 3, first)
+        self.assertEqual(len(result["headers"]) - 2, last)
+
+    def test_each_column_sums_its_own_airline_over_the_months(self):
+        result = self.build_all_airlines(self.two_months_two_airlines())
+
+        row = self.row_for_code(result, "965")
+        for index in range(2):
+            with self.subTest(airline=index):
+                self.assertEqual(
+                    row[f"m_2025_January_a_{index}"] + row[f"m_2025_February_a_{index}"],
+                    row[ga12_airline_total_key(index)],
+                )
+
+    def test_the_grand_total_is_their_sum(self):
+        """Иначе крайняя колонка разошлась бы с соседями в своей же строке."""
+        result = self.build_all_airlines(self.two_months_two_airlines())
+
+        row = self.row_for_code(result, "965")
+        self.assertEqual(
+            row["total_a_0"] + row["total_a_1"], row["grand_total"]
+        )
+
+    def test_nested_route_types_are_not_counted_twice(self):
+        """Местные входят во внутренние — как и в колонках «Свод» (BUG-2)."""
+        result = self.build_all_airlines(blank_row_records())
+
+        row = self.row_for_code(result, "965")
+        self.assertEqual(BLANK_TOTAL, row["total_a_0"])
+
+    def test_single_month_gets_the_columns_too(self):
+        """Раскладка одна при любом числе месяцев, хоть итог и повторяет месяц."""
+        result = self.build_all_airlines(blank_row_records())
+
+        row = self.row_for_code(result, "965")
+        self.assertEqual(row["m_2025_January_a_0"], row["total_a_0"])
+
+    def test_section_heading_row_keeps_the_cell_empty(self):
+        result = self.build_all_airlines(blank_row_records())
+
+        headings = [r for r in result["rows"] if str(r["indicator"]).startswith("—")]
+        self.assertTrue(headings)
+        for row in headings:
+            self.assertIsNone(row["total_a_0"])
+
+    def test_empty_selection_adds_neither_column_nor_group(self):
+        """Складывать нечего: авиакомпаний в выборке нет."""
+        result = self.build_all_airlines([])
+
+        self.assertEqual("grand_total", result["keys"][-1])
+        self.assertNotIn("total_a_0", result["keys"])
+        self.assertEqual([], [g for g in result["groups"] if g[2] == GA12_PERIOD_TOTAL_GROUP])
+
+    def test_other_layouts_do_not_get_the_columns(self):
+        """Итоги за период просили в общем своде: остальные таблицы не трогаем."""
+        for build in (
+            self.build_per_airline_by_routes,
+            self.build_per_airline_summary,
+            self.build_multi_airline_by_routes,
+        ):
+            with self.subTest(build=build.__name__):
+                self.assertNotIn("total_a_0", build(blank_row_records())["keys"])
 
 
 if __name__ == "__main__":
